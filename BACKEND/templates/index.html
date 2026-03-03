@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Funnel Chat</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f7f7f7;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .chat-container {
+            width: 400px;
+            background-color: white;
+            padding: 20px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            overflow-y: auto;
+            height: 400px;
+        }
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 8px;
+        }
+        .user-message {
+            background-color: #d1f7d1;
+            text-align: right;
+        }
+        .bot-message {
+            background-color: #f1f1f1;
+            text-align: left;
+        }
+        .input-container {
+            display: flex;
+            margin-top: 20px;
+        }
+        .input-container input {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+        .input-container button {
+            padding: 10px 15px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="chat-container" id="chat-container">
+        <div class="message bot-message" id="bot-message">¡Hola! ¿Cómo te llamas?</div>
+    </div>
+
+    <div class="input-container">
+        <input type="text" id="user-input" placeholder="Escribe tu respuesta...">
+        <button onclick="sendMessage()">Enviar</button>
+    </div>
+
+    <script>
+        let userData = {};  // Objeto para almacenar las respuestas del usuario
+
+        function sendMessage() {
+            const userMessage = document.getElementById("user-input").value;
+            if (userMessage.trim() === "") return;
+
+            // Mostrar el mensaje del usuario
+            const chatContainer = document.getElementById("chat-container");
+            const userMessageDiv = document.createElement("div");
+            userMessageDiv.classList.add("message", "user-message");
+            userMessageDiv.textContent = userMessage;
+            chatContainer.appendChild(userMessageDiv);
+
+            // Limpiar el input
+            document.getElementById("user-input").value = "";
+
+            // Enviar el mensaje al backend para obtener la respuesta
+            fetch('/funnel', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ message: userMessage })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Mostrar la respuesta del bot
+                const botMessageDiv = document.createElement("div");
+                botMessageDiv.classList.add("message", "bot-message");
+                botMessageDiv.textContent = data.message;
+                chatContainer.appendChild(botMessageDiv);
+
+                // Desplazar el chat hacia abajo
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            });
+        }
+    </script>
+
+</body>
+</html>
