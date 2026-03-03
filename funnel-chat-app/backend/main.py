@@ -32,18 +32,6 @@ async def get_stats():
         "automations": 28
     }
 
-@app.get("/api/dashboard/activity")
-async def get_activity():
-    return [
-        {"name": "Lun", "leads": 40, "chats": 24},
-        {"name": "Mar", "leads": 30, "chats": 13},
-        {"name": "Mie", "leads": 20, "chats": 98},
-        {"name": "Jue", "leads": 27, "chats": 39},
-        {"name": "Vie", "leads": 18, "chats": 48},
-        {"name": "Sab", "leads": 23, "chats": 38},
-        {"name": "Dom", "leads": 34, "chats": 43},
-    ]
-
 @app.get("/api/contacts")
 async def get_contacts():
     return [
@@ -51,25 +39,6 @@ async def get_contacts():
         {"id": 2, "name": "María Garcia", "email": "maria@example.com", "status": "Tibio", "tag": "Soporte"},
         {"id": 3, "name": "Carlos Ruiz", "email": "carlos@example.com", "status": "Frío", "tag": "Nuevo"},
     ]
-
-flows_db = []
-
-@app.get("/api/flows")
-async def get_flows():
-    return flows_db if flows_db else [
-        { 
-            "id": "1", 
-            "position": { "x": 100, "y": 100 }, 
-            "data": { "label": "Bienvenida" }, 
-            "type": "messageNode" 
-        }
-    ]
-
-@app.post("/api/flows")
-async def save_flows(data: list):
-    global flows_db
-    flows_db = data
-    return {"message": "Flow saved successfully"}
 
 @sio.event
 async def connect(sid, environ):
