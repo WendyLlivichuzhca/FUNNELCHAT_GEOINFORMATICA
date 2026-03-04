@@ -1,0 +1,89 @@
+[
+  {
+    "id": {
+      "server": "lid",
+      "user": "100533004148836",
+      "_serialized": "100533004148836@lid"
+    },
+    "number": "100533004148836",
+    "isBusiness": false,
+    "labels": [],
+    "type": "in",
+    "isMe": false,
+    "isUser": true,
+    "isGroup": false,
+    "isWAContact": true,
+    "isMyContact": false,
+    "isBlocked": false
+  },
+  {
+    "id": {
+      "server": "c.us",
+      "user": "593983017840",
+      "_serialized": "593983017840@c.us"
+    },
+    "number": "593983017840",
+    "isBusiness": false,
+    "labels": [],
+    "statusMute": false,
+    "type": "in",
+    "isMe": false,
+    "isUser": true,
+    "isGroup": false,
+    "isWAContact": true,
+    "isMyContact": false,
+    "isBlocked": false
+  },
+  {
+    "id": {
+      "server": "lid",
+      "user": "100811824750685",
+      "_serialized": "100811824750685@lid"
+    },
+    "number": "100811824750685",
+    "isBusiness": false,
+    "labels": [],
+    "type": "in",
+    "isMe": false,
+    "isUser": true,
+    "isGroup": false,
+    "isWAContact": true,
+    "isMyContact": false,
+    "isBlocked": false
+  },
+  {
+    "id": {
+      "server": "c.us",
+      "user": "593963316660",
+      "_serialized": "593963316660@c.us"
+    },
+    "number": "593963316660",
+    "isBusiness": false,
+    "labels": [],
+    "statusMute": false,
+    "type": "in",
+    "isMe": false,
+    "isUser": true,
+    "isGroup": false,
+    "isWAContact": true,
+    "isMyContact": false,
+    "isBlocked": false
+  },
+  {
+    "id": {
+      "server": "lid",
+      "user": "100948978438381",
+      "_serialized": "100948978438381@lid"
+    },
+    "number": "100948978438381",
+    "isBusiness": false,
+    "labels": [],
+    "type": "in",
+    "isMe": false,
+    "isUser": true,
+    "isGroup": false,
+    "isWAContact": true,
+    "isMyContact": false,
+    "isBlocked": false
+  }
+]

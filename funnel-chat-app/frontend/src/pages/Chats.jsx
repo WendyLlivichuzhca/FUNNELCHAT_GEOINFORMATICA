@@ -5,33 +5,52 @@ import io from 'socket.io-client';
 const socket = io('http://localhost:8000');
 
 const Chats = () => {
-    const [messages, setMessages] = useState([
-        { id: 1, text: '¿Hola, podrías darme más información?', sender: 'user' },
-        { id: 2, text: '¡Claro! ¿En qué puedo ayudarte hoy?', sender: 'bot' }
-    ]);
+    const [contacts, setContacts] = useState([]);
+    const [messages, setMessages] = useState([]);
+    const [activeContact, setActiveContact] = useState(null);
     const [inputValue, setInputValue] = useState('');
     const chatEndRef = useRef(null);
 
+    // Cargar contactos al inicio
+    useEffect(() => {
+        fetch('http://localhost:8000/api/contacts')
+            .then(res => res.json())
+            .then(data => {
+                setContacts(data);
+                if (data.length > 0) handleSelectContact(data[0]);
+            })
+            .catch(err => console.error("Error fetching contacts:", err));
+    }, []);
+
+    const handleSelectContact = (contact) => {
+        setActiveContact(contact);
+        // Cargar historial del contacto
+        fetch(`http://localhost:8000/api/chat/${contact.id}`)
+            .then(res => res.json())
+            .then(data => setMessages(data))
+            .catch(err => console.error("Error fetching history:", err));
+    };
+
     useEffect(() => {
         socket.on('response', (data) => {
-            setMessages(prev => [...prev, { id: Date.now(), text: data.text, sender: 'bot' }]);
+            if (activeContact && data.contact_id === activeContact.id) {
+                setMessages(prev => [...prev, { id: Date.now(), text: data.text, sender: 'bot' }]);
+            }
         });
 
         return () => socket.off('response');
-    }, []);
-
-    useEffect(() => {
-        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
+    }, [activeContact]);
 
     const handleSend = () => {
-        if (!inputValue.trim()) return;
+        if (!inputValue.trim() || !activeContact) return;
+
+        const newMessage = { id: Date.now(), text: inputValue, sender: 'user' };
 
         // Send to server
-        socket.emit('message', inputValue);
+        socket.emit('message', { contact_id: activeContact.id, text: inputValue });
 
-        // Add locally immediately
-        setMessages(prev => [...prev, { id: Date.now(), text: inputValue, sender: 'user' }]);
+        // Add locally
+        setMessages(prev => [...prev, newMessage]);
         setInputValue('');
     };
 
@@ -42,22 +61,26 @@ const Chats = () => {
                 <div style={{ padding: '20px', borderBottom: '1px solid var(--surface-border)' }}>
                     <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>Conversaciones</h3>
                 </div>
-                <div style={{ flex: 1, overflowY: 'auto', padding: '12px' }}>
-                    {[1].map(i => (
-                        <div key={i} style={{
-                            padding: '12px',
-                            borderRadius: '12px',
-                            marginBottom: '8px',
-                            cursor: 'pointer',
-                            backgroundColor: 'rgba(109, 40, 217, 0.1)',
-                            border: '1px solid var(--primary)'
-                        }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                <span style={{ fontWeight: '500' }}>Cliente {i}</span>
-                                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Ahora</span>
+                <div style={{ flex: 1, overflowY: 'auto', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {contacts.map(contact => (
+                        <div
+                            key={contact.id}
+                            onClick={() => handleSelectContact(contact)}
+                            style={{
+                                padding: '12px',
+                                borderRadius: '12px',
+                                cursor: 'pointer',
+                                backgroundColor: activeContact?.id === contact.id ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                                border: `1px solid ${activeContact?.id === contact.id ? 'var(--primary)' : 'var(--glass-border)'}`,
+                                transition: 'all 0.2s'
+                            }}
+                        >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', alignItems: 'center' }}>
+                                <span style={{ fontWeight: '600', fontSize: '14px' }}>{contact.name}</span>
+                                <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{contact.status}</span>
                             </div>
-                            <p style={{ fontSize: '13px', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                {messages[messages.length - 1]?.text}
+                            <p style={{ fontSize: '12px', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {contact.email}
                             </p>
                         </div>
                     ))}
@@ -67,10 +90,12 @@ const Chats = () => {
             {/* Main Chat Window */}
             <div className="glass-card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
                 <div style={{ padding: '20px', borderBottom: '1px solid var(--surface-border)', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>C1</div>
+                    <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'var(--primary-gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                        {activeContact?.name.charAt(0)}
+                    </div>
                     <div>
-                        <h3 style={{ fontSize: '16px', fontWeight: 'bold' }}>Cliente 1</h3>
-                        <span style={{ fontSize: '12px', color: '#10b981' }}>En línea</span>
+                        <h3 style={{ fontSize: '16px', fontWeight: 'bold' }}>{activeContact?.name || 'Selecciona un chat'}</h3>
+                        <span style={{ fontSize: '12px', color: '#10b981' }}>Activo en el Funnel</span>
                     </div>
                 </div>
 
