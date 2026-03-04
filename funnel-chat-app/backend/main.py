@@ -100,7 +100,7 @@ bridge_process = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global bridge_process
-    print("🚀 Iniciando el puente de WhatsApp (Node.js)...")
+    print("Iniciando el puente de WhatsApp (Node.js)...")
     bridge_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whatsapp-bridge")
     bridge_script = os.path.join(bridge_dir, "bridge.js")
     
@@ -110,20 +110,20 @@ async def lifespan(app: FastAPI):
             ["node", bridge_script],
             cwd=bridge_dir
         )
-        print("✅ Puente de WhatsApp iniciado automáticamente.")
+        print("Puente de WhatsApp iniciado automáticamente.")
     except Exception as e:
-        print(f"❌ Error al iniciar el puente de WhatsApp: {e}")
+        print(f"Error al iniciar el puente de WhatsApp: {e}")
         
     yield # Aquí el backend está corriendo
     
     if bridge_process:
-        print("🛑 Deteniendo el puente de WhatsApp...")
+        print("Deteniendo el puente de WhatsApp...")
         bridge_process.terminate()
         try:
             bridge_process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             bridge_process.kill()
-        print("✅ Puente de WhatsApp detenido.")
+        print("Puente de WhatsApp detenido.")
 
 # Inicialización de FastAPI
 app = FastAPI(title="Funnel Chat API", lifespan=lifespan)
@@ -334,7 +334,13 @@ async def start_qr_session(data: dict, db: Session = Depends(get_db), current_us
     active_qr_user_id = current_user.id
     if device_id:
         qr_sessions[device_id] = current_user.id
+    
     print(f"[QR SESSION] Usuario {current_user.username} (id={current_user.id}) inició sesión QR")
+    
+    # IMPORTANTE: Pedir al puente su estado actual por si ya está conectado
+    print("--- [MAIN.PY] SOLICITANDO ESTADO ACTUAL AL PUENTE ---")
+    await sio.emit('request_whatsapp_status', {})
+    
     return {"status": "ok", "user_id": current_user.id}
 
 @app.post("/connect_device")
@@ -404,32 +410,73 @@ def get_next_node(current_node_id, message_text=None):
     return next((n for n in nodes if n["id"] == target_node_id), None)
 
 @app.get("/api/chat/{contact_id}")
-async def get_chat_history(contact_id: int):
-    return chat_histories.get(contact_id, [])
+async def get_chat_history(contact_id: str):
+    if not contact_id or contact_id == "null" or contact_id == "undefined":
+        return []
+
+    # Intentamos encontrar el JID del contacto si es un ID numérico
+    db_contacts = []
+    for u_id in contacts_mock_db:
+        db_contacts.extend(contacts_mock_db[u_id])
+    
+    contact = next((c for c in db_contacts if str(c.get("id")) == str(contact_id)), None)
+    wid = contact.get("whatsapp_id") if contact else (contact_id if "@" in contact_id else None)
+
+    if not wid:
+        print(f">>> [BACKEND] No se encontró JID para el ID: {contact_id}")
+        return []
+
+    local_history = chat_histories.get(wid, [])
+    if not local_history:
+        print(f">>> [BACKEND] PIDIENDO HISTORIAL REAL AL PUENTE PARA WID: {wid}")
+        await sio.emit('request_chat_history', {"contact_id": wid})
+    
+    return local_history
+
+@sio.on('whatsapp_history_response')
+async def handle_whatsapp_history(sid, data):
+    contact_id = data.get("contact_id")
+    history = data.get("history", [])
+    print(f">>> [BACKEND] RECIBIDO HISTORIAL DE {len(history)} MENSAJES PARA {contact_id}")
+    # Guardar en caché local temporal
+    chat_histories[contact_id] = history
+    # Notificar al frontend para que refresque
+    await sio.emit('history_ready', {"contact_id": contact_id, "history": history})
 
 # --- EVENTOS DEL PUENTE WHATSAPP (NODE.JS) ---
 
 @sio.on('whatsapp_qr')
 async def handle_whatsapp_qr(sid, data):
     qr_code = data.get("qr")
-    print(f"RECIBIDO QR REAL DEL PUENTE: {qr_code[:20]}...")
-    # Reenviar al frontend para que lo muestre en el modal
+    print(f">>> [SOCKET] QR RECIBIDO DEL PUENTE. RETRANSMITIENDO A FRONTEND...")
     await sio.emit('whatsapp_qr_ready', {"qr": qr_code})
+    print(f">>> [SOCKET] EVENTO 'whatsapp_qr_ready' EMITIDO AL FRONTEND")
 
 @sio.on('whatsapp_status')
 async def handle_whatsapp_status(sid, data):
     status_val = data.get("status")
-    print(f"--- [MAIN.PY] EVENTO DE ESTADO DEL PUENTE: {status_val} (QR user: {active_qr_user_id}) ---")
+    print(f">>> [SOCKET] ESTADO RECIBIDO: {status_val}")
     
     db = SessionLocal()
     try:
-        # Actualizamos el dispositivo del usuario que inició la sesión QR
+        # Prioridad 1: El usuario que está intentando conectar ahora
+        # Prioridad 2: Buscar si hay algún dispositivo ya conectado que necesite refrescar su estado
+        device = None
         if active_qr_user_id:
             device = db.query(Device).filter(
                 Device.user_id == active_qr_user_id,
                 Device.device_name == "WhatsApp Personal"
             ).first()
-        else:
+        
+        if not device:
+            # Fallback seguro: No pillar ID 1 a ciegas, buscar quién está marcado como conectado
+            device = db.query(Device).filter(
+                Device.device_name == "WhatsApp Personal",
+                Device.status == "conectado"
+            ).first()
+        
+        # Si sigue sin haber nada, entonces cogemos el primero (Wendy ID 3 en su caso)
+        if not device:
             device = db.query(Device).filter(Device.device_name == "WhatsApp Personal").first()
         
         if device:
@@ -450,10 +497,22 @@ async def handle_whatsapp_message(sid, data):
 async def handle_whatsapp_contacts(sid, data):
     new_contacts = data.get("contacts", [])
     target_user_id = active_qr_user_id  # El usuario que inició el escaneo QR
+    
+    # Fallback: Si no hay usuario activo (conexión automática al arrancar), buscar quién es el dueño del dispositivo
+    if target_user_id is None:
+        db = SessionLocal()
+        try:
+            device = db.query(Device).filter(Device.device_name == "WhatsApp Personal", Device.status == "conectado").first()
+            if device:
+                target_user_id = device.user_id
+                print(f"--- [MAIN.PY] Fallback: Asignando contactos al dueño del dispositivo (user_id={target_user_id}) ---")
+        finally:
+            db.close()
+
     print(f"--- [MAIN.PY] RECIBIDOS {len(new_contacts)} CONTACTOS - asignando a user_id={target_user_id} ---")
     
     if target_user_id is None:
-        print("[WARN] No hay usuario activo para la sesión QR. Ignorando contactos.")
+        print("[WARN] No hay usuario activo ni dispositivo conectado para asociar contactos. Ignorando.")
         return
     
     # Inicializar lista del usuario si no existe
@@ -468,6 +527,7 @@ async def handle_whatsapp_contacts(sid, data):
         if num and num not in existing_nums:
             new_contact = {
                 "id": len(contacts_mock_db[target_user_id]) + 1,
+                "whatsapp_id": wc.get("id"), # Guardamos el JID real
                 "name": name,
                 "phone": num,
                 "email": f"{num}@whatsapp.com",
@@ -479,9 +539,28 @@ async def handle_whatsapp_contacts(sid, data):
             existing_nums.add(num)
             synced_count += 1
     
-    print(f"--- [MAIN.PY] {synced_count} CONTACTOS ASIGNADOS AL USUARIO {target_user_id} ---")
-    # Emitir solo al usuario que hizo la petición (o broadcast)
+    print(f">>> [BACKEND] PROCESANDO {synced_count} CONTACTOS NUEVOS...")
+    
+    # Emitir broadcast para que cualquier pestaña del usuario se actualice
+    print(f">>> [BACKEND] EMITIENDO 'contacts_updated' AL FRONTEND (Total: {len(contacts_mock_db.get(target_user_id, []))})")
     await sio.emit('contacts_updated', {"count": synced_count, "user_id": target_user_id})
+
+@app.post("/api/devices/logout")
+async def logout_device(current_user: User = Depends(get_current_user)):
+    print(f"--- [MAIN.PY] USUARIO {current_user.id} SOLICITA LOGOUT DE WHATSAPP ---")
+    await sio.emit('whatsapp_logout', {})
+    
+    db = SessionLocal()
+    try:
+        device = db.query(Device).filter(Device.user_id == current_user.id, Device.device_name == "WhatsApp Personal").first()
+        if device:
+            device.status = "desconectado"
+            db.commit()
+            await sio.emit('device_status', {"device_id": device.id, "status": "desconectado"})
+    finally:
+        db.close()
+        
+    return {"status": "success", "message": "Orden de logout enviada"}
 
 @app.post("/api/sync_contacts")
 async def sync_contacts():

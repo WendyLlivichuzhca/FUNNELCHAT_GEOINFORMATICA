@@ -1,105 +1,131 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
 const io = require('socket.io-client');
 
 // Conexión al backend de FastAPI
-const socket = io('http://localhost:8000');
-
-socket.on('connect', () => {
-    console.log('CONECTADO AL BACKEND FASTAPI (SOCKET.IO)');
+const socket = io('http://127.0.0.1:8000', {
+    transports: ['websocket']
 });
 
-socket.on('connect_error', (err) => {
-    console.error('ERROR DE CONEXIÓN AL BACKEND:', err.message);
+socket.on('connect', () => {
+    console.log('>>> BRIDGE CONECTADO AL BACKEND (SID:', socket.id, ')');
 });
 
 const client = new Client({
-    authStrategy: new LocalAuth({
-        dataId: 'funnel-chat-session'
-    }),
     puppeteer: {
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-extensions',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process'
+        ]
+    },
+    webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
     }
 });
 
+let lastQr = null;
 client.on('qr', (qr) => {
-    console.log('NUEVO QR RECIBIDO. ENVIANDO A FRON END...');
-    // qrcode.generate(qr, { small: true }); // Opcional: Ver en consola
-    socket.emit('whatsapp_qr', { qr });
+    if (qr !== lastQr) {
+        lastQr = qr;
+        console.log('>>> NUEVO QR GENERADO. ENVIANDO AL BACKEND...');
+        socket.emit('whatsapp_qr', { qr });
+    }
 });
 
 client.on('ready', async () => {
-    console.log('WHATSAPP ESTÁ LISTO!');
+    console.log('>>> WHATSAPP ESTÁ LISTO!');
     socket.emit('whatsapp_status', { status: 'conectado' });
 
-    console.log('ESPERANDO 2 SEGUNDOS PARA QUE LA LIBRETA SE DESCARGUE (OPTIMIZADO)...');
+    console.log('INICIANDO SINCRONIZACIÓN PRIORITARIA DE CHATS Y GRUPOS...');
     try {
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 500));
 
-        const [contacts, chats] = await Promise.all([
-            client.getContacts(),
-            client.getChats()
-        ]);
+        const chats = await client.getChats();
+        console.log(`>>> SE ENCONTRARON ${chats.length} CHATS ACTIVOS.`);
 
-        console.log(`SE ENCONTRARON ${contacts.length} CONTACTOS EN TOTAL Y ${chats.length} CHATS.`);
-
-        // Crear mapa de nombres desde los chats (útil si la libreta aún no se sincroniza)
-        const chatNames = {};
-        for (const chat of chats) {
-            if (!chat.isGroup && chat.name && chat.name !== chat.id.user) {
-                chatNames[chat.id._serialized] = chat.name;
-            }
-        }
-
-        // Filtrar para incluir SOLO los que tengan algún tipo de nombre textual (no solo el número)
-        const validContacts = contacts
-            .filter(c => !c.isGroup && c.id && c.id.server === 'c.us')
-            .map(c => {
-                const finalName = c.name || chatNames[c.id._serialized] || c.pushname || c.verifiedName;
+        const validContacts = chats
+            .filter(chat => chat.id.server === 'c.us' || chat.id.server === 'g.us')
+            .map(chat => {
+                const num = chat.isGroup ? chat.id._serialized : chat.id.user;
                 return {
-                    id: c.id._serialized,
-                    name: finalName,
-                    number: c.number || c.id._serialized.split('@')[0],
-                    isGroup: false
+                    id: chat.id._serialized,
+                    // Si no hay nombre, usamos el número o ID como respaldo para que no se pierda el contacto
+                    name: chat.name || chat.pushname || (chat.isGroup ? 'Grupo de WhatsApp' : num),
+                    number: num,
+                    isGroup: chat.isGroup
                 };
-            })
-            .filter(c => c.name && c.name.trim() !== ''); // Excluir si no hay nombre
+            });
 
-        console.log(`ENVIANDO ${validContacts.length} CONTACTOS IDENTIFICADOS AL BACKEND...`);
+        console.log(`>>> ENVIANDO ${validContacts.length} CONTACTOS TOTALES AL BACKEND (FILTRO FLEXIBLE)...`);
         socket.emit('whatsapp_contacts', { contacts: validContacts });
     } catch (err) {
-        console.error('ERROR AL OBTENER CONTACTOS:', err);
+        console.error('ERROR EN SINCRONIZACIÓN INTEGRAL:', err);
+    }
+});
+
+// NUEVO: Recuperación de historial bajo demanda
+socket.on('request_chat_history', async (data) => {
+    const contactId = data ? data.contact_id : null;
+
+    if (!contactId || contactId === 'null' || contactId === 'undefined') {
+        console.log('>>> [BRIDGE] ID de contacto inválido recibido, ignorando petición.');
+        return;
+    }
+
+    console.log(`>>> PETICIÓN DE HISTORIAL PARA: ${contactId}`);
+    try {
+        // Verificar que el cliente existe y está listo
+        if (!client || !client.pupPage) {
+            console.log('>>> [BRIDGE] El cliente de WhatsApp no ha cargado aún el navegador.');
+            return;
+        }
+
+        const state = await client.getState().catch(() => null);
+        if (state !== 'CONNECTED') {
+            console.log(`>>> [BRIDGE] Cliente en estado ${state}, no se puede recuperar historial aún.`);
+            return;
+        }
+
+        const chat = await client.getChatById(contactId);
+        const messages = await chat.fetchMessages({ limit: 40 });
+
+        const history = messages.map(msg => ({
+            id: msg.id._serialized,
+            text: msg.body,
+            sender: msg.fromMe ? 'bot' : 'user',
+            timestamp: msg.timestamp
+        }));
+
+        console.log(`>>> ENVIANDO ${history.length} MENSAJES DE HISTORIAL A ${contactId}`);
+        socket.emit('whatsapp_history_response', { contact_id: contactId, history });
+    } catch (err) {
+        console.error('ERROR AL RECUPERAR HISTORIAL:', err.message);
     }
 });
 
 socket.on('request_contacts_sync', async () => {
-    console.log('PETICIÓN MANUAL DE SINCRONIZACIÓN DE CONTACTOS RECIBIDA');
+    console.log('PETICIÓN MANUAL DE SINCRONIZACIÓN DE CHATS RECIBIDA');
     try {
-        const [contacts, chats] = await Promise.all([
-            client.getContacts(),
-            client.getChats()
-        ]);
-
-        const chatNames = {};
-        for (const chat of chats) {
-            if (!chat.isGroup && chat.name && chat.name !== chat.id.user) {
-                chatNames[chat.id._serialized] = chat.name;
-            }
-        }
-
-        const validContacts = contacts
-            .filter(c => !c.isGroup && c.id && c.id.server === 'c.us')
-            .map(c => {
-                const finalName = c.name || chatNames[c.id._serialized] || c.pushname || c.verifiedName;
+        const chats = await client.getChats();
+        const validContacts = chats
+            .filter(chat => !chat.isGroup && chat.id.server === 'c.us')
+            .map(chat => {
                 return {
-                    id: c.id._serialized,
-                    name: finalName,
-                    number: c.number || c.id._serialized.split('@')[0],
+                    id: chat.id._serialized,
+                    name: chat.name || chat.pushname || chat.id.user,
+                    number: chat.id.user,
                     isGroup: false
                 };
             })
-            .filter(c => c.name && c.name.trim() !== ''); // Excluir si no hay nombre
+            .filter(c => c.name && c.name.trim() !== '');
 
         socket.emit('whatsapp_contacts', { contacts: validContacts });
     } catch (err) {

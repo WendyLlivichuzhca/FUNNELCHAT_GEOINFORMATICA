@@ -3,7 +3,19 @@ import { Users, MessageSquare, TrendingUp, Zap, Plus, Smartphone, CheckCircle, X
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { io } from 'socket.io-client';
 
-const socket = io('http://localhost:8000');
+const socket = io('http://127.0.0.1:8000', {
+    transports: ['websocket'],
+    autoConnect: true
+});
+
+// Logs de depuración para la conexión del socket
+socket.on('connect', () => {
+    console.log('>>> DASHBOARD CONECTADO AL BACKEND (SID:', socket.id, ')');
+});
+
+socket.on('connect_error', (err) => {
+    console.error('>>> ERROR DE CONEXIÓN SOCKET:', err.message);
+});
 
 const data = [
     { name: 'Lun', leads: 40, conv: 24 },
@@ -75,7 +87,7 @@ const ConnectionCard = ({ device, onToggle }) => {
     );
 };
 
-const QRConnectionModal = ({ isOpen, onClose, onFinish }) => {
+const QRModal = ({ isOpen, onClose, onFinish, onLogout }) => {
     const [step, setStep] = useState(1); // 1: QR, 2: Syncing
     const [progress, setProgress] = useState(0);
     const [qrCode, setQrCode] = useState(null);
@@ -90,16 +102,19 @@ const QRConnectionModal = ({ isOpen, onClose, onFinish }) => {
             return;
         }
 
-        setQrError(false);
-        setQrCode(null);
+        // NO llamar a setQrCode(null) aquí si ya tenemos uno, 
+        // para evitar que el re-render por setQrCode dispare este efecto de nuevo
+        if (!qrCode) {
+            setQrError(false);
+        }
 
-        // Timeout de 20 segundos: si no llega QR, mostrar error
         const timeout = setTimeout(() => {
-            setQrError(true);
-            console.warn('[QR] Timeout: no llegó QR del bridge en 20 segundos');
+            if (step === 1 && !qrCode) {
+                setQrError(true);
+                console.warn('[QR] Timeout: no llegó QR del bridge en 20 segundos');
+            }
         }, 20000);
 
-        // Escuchar QR real del backend
         socket.on('whatsapp_qr_ready', (data) => {
             clearTimeout(timeout);
             console.log("QR Real recibido para mostrar:", data.qr.substring(0, 20) + "...");
@@ -107,7 +122,6 @@ const QRConnectionModal = ({ isOpen, onClose, onFinish }) => {
             setQrError(false);
         });
 
-        // Escuchar estado para cambiar a sincronización automáticamente
         socket.on('device_status', (data) => {
             if (data.status === 'conectado') {
                 clearTimeout(timeout);
@@ -115,7 +129,6 @@ const QRConnectionModal = ({ isOpen, onClose, onFinish }) => {
             }
         });
 
-        // Escuchar cuando la sincronización real termina para cerrar el modal
         socket.on('contacts_updated', (data) => {
             console.log("Sincronización de contactos detectada en Dashboard:", data);
             setProgress(100);
@@ -130,23 +143,33 @@ const QRConnectionModal = ({ isOpen, onClose, onFinish }) => {
             socket.off('device_status');
             socket.off('contacts_updated');
         };
-    }, [isOpen]);
+    }, [isOpen, onFinish, step, !!qrCode]);
+    // Usamos !!qrCode como dependencia para que solo reaccione al cambio de "hay qr" a "no hay qr"
+    // y no al contenido del string en sí, aunque el problema principal era el setQrCode(null) interior.
 
     useEffect(() => {
         if (step === 2) {
-            // Animación rápida inicial hasta el 90%
-            const interval = setInterval(() => {
+            let interval = setInterval(() => {
                 setProgress(prev => {
-                    if (prev >= 90) {
-                        clearInterval(interval);
-                        return 90;
-                    }
-                    return prev + 10; // Aumento mucho más rápido (10% cada 100ms)
+                    if (prev < 90) return prev + 1;
+                    return prev;
                 });
             }, 100);
-            return () => clearInterval(interval);
+
+            // SEGURIDAD: Si llegamos al 90% y estamos "conectados" pero el backend
+            // no ha mandado 'contacts_updated' en 6 segundos adicionales, cerramos igual.
+            const safetyTimeout = setTimeout(() => {
+                console.warn("[QR] Sincronización lenta detectada, forzando finalización por seguridad.");
+                setProgress(100);
+                setTimeout(() => onFinish(), 500);
+            }, 6000);
+
+            return () => {
+                clearInterval(interval);
+                clearTimeout(safetyTimeout);
+            };
         }
-    }, [step]);
+    }, [step, onFinish]);
 
     if (!isOpen) return null;
 
@@ -177,13 +200,35 @@ const QRConnectionModal = ({ isOpen, onClose, onFinish }) => {
                                     <li>Toca <span style={{ fontWeight: 'bold', color: 'white' }}>Vincular un dispositivo</span></li>
                                     <li>Escanea el código de la derecha con la cámara de tu WhatsApp</li>
                                 </ol>
-                                <div style={{
-                                    padding: '12px', background: 'rgba(16, 185, 129, 0.1)',
-                                    borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.2)'
-                                }}>
-                                    <p style={{ color: '#10b981', fontSize: '13px', fontWeight: '500' }}>
-                                        ✓ Conexión Segura Calidad FunnelChat
-                                    </p>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                    <div style={{
+                                        padding: '12px', background: 'rgba(16, 185, 129, 0.1)',
+                                        borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.2)'
+                                    }}>
+                                        <p style={{ color: '#10b981', fontSize: '13px', fontWeight: '500', margin: 0 }}>
+                                            ✓ Conexión Segura Calidad FunnelChat
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={onLogout}
+                                        style={{
+                                            background: 'rgba(239, 68, 68, 0.1)',
+                                            color: '#ef4444',
+                                            border: '1px solid rgba(239, 68, 68, 0.2)',
+                                            padding: '8px 12px',
+                                            borderRadius: '8px',
+                                            fontSize: '12px',
+                                            cursor: 'pointer',
+                                            fontWeight: '600',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            gap: '6px'
+                                        }}
+                                    >
+                                        <XCircle size={14} />
+                                        Cerrar sesión actual / Resetear QR
+                                    </button>
                                 </div>
                             </div>
 
@@ -202,13 +247,15 @@ const QRConnectionModal = ({ isOpen, onClose, onFinish }) => {
                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '8px' }}>
                                         <span style={{ fontSize: '28px' }}>⚠️</span>
                                         <p style={{ color: '#ef4444', fontSize: '11px', fontWeight: 'bold', margin: 0 }}>Bridge no responde</p>
-                                        <p style={{ color: '#64748b', fontSize: '10px', margin: 0, textAlign: 'center' }}>Asegúrate de que el bridge de WhatsApp esté corriendo</p>
-                                        <button
-                                            onClick={() => { setQrError(false); setQrCode(null); }}
-                                            style={{ marginTop: '4px', padding: '6px 14px', background: '#6366f1', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
-                                        >
-                                            Reintentar
-                                        </button>
+                                        <p style={{ color: '#64748b', fontSize: '10px', margin: 0, textAlign: 'center' }}>¿Ya estabas conectado? Intenta resetear o cerrar sesión.</p>
+                                        <div style={{ display: 'flex', gap: '4px' }}>
+                                            <button
+                                                onClick={() => { setQrError(false); setQrCode(null); }}
+                                                style={{ padding: '6px 10px', background: '#6366f1', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
+                                            >
+                                                Reintentar
+                                            </button>
+                                        </div>
                                     </div>
                                 ) : (
                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
@@ -433,7 +480,7 @@ const Dashboard = () => {
         // Registrar sesión QR en el backend para vincular contactos al usuario correcto
         const token = localStorage.getItem('token');
         try {
-            await fetch('http://localhost:8000/api/devices/start-qr', {
+            await fetch('http://127.0.0.1:8000/api/devices/start-qr', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -442,11 +489,35 @@ const Dashboard = () => {
                 body: JSON.stringify({ device_id: selectedDevice?.id })
             });
             console.log("Sesión QR registrada para el usuario actual");
+
+            // Si el dispositivo ya figura como conectado en nuestra lista de estado,
+            // podemos saltar directamente al paso de sincronización
+            if (selectedDevice?.status === 'conectado') {
+                setStep(2);
+            }
         } catch (err) {
             console.warn("No se pudo registrar la sesión QR:", err);
         }
 
         setIsQRModalOpen(true);
+    };
+
+    const handleLogoutWhatsApp = async () => {
+        if (!window.confirm("¿Estás seguro de que deseas cerrar la sesión de WhatsApp? Esto desconectará el dispositivo.")) return;
+
+        const token = localStorage.getItem('token');
+        try {
+            const response = await fetch('http://127.0.0.1:8000/api/devices/logout', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (response.ok) {
+                console.log("Petición de logout enviada");
+                setIsQRModalOpen(false);
+            }
+        } catch (err) {
+            console.error("Error logging out WhatsApp:", err);
+        }
     };
 
     const handleFinishQR = async () => {
@@ -488,11 +559,14 @@ const Dashboard = () => {
                 onQRLink={handleOpenQR}
                 device={selectedDevice}
             />
-            <QRConnectionModal
-                isOpen={isQRModalOpen}
-                onClose={() => setIsQRModalOpen(false)}
-                onFinish={handleFinishQR}
-            />
+            {isQRModalOpen && (
+                <QRModal
+                    isOpen={isQRModalOpen}
+                    onClose={() => setIsQRModalOpen(false)}
+                    onFinish={handleFinishQR}
+                    onLogout={handleLogoutWhatsApp}
+                />
+            )}
             <header>
                 <h2 style={{ fontSize: '32px', fontWeight: '800', letterSpacing: '-1px' }}>
                     Bienvenido, {localStorage.getItem('username') || 'Usuario'}
@@ -521,7 +595,7 @@ const Dashboard = () => {
                         </div>
                     </div>
                 </div>
-                <div style={{ width: '100%', height: '300px', flexGrow: 1, minWidth: 0 }}>
+                <div style={{ width: '100%', height: '300px' }}> {/* Altura fija para Recharts */}
                     <ResponsiveContainer width="100%" height="100%" debounce={50}>
                         <AreaChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                             <defs>

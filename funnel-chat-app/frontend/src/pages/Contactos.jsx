@@ -2,7 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Search, Filter, UserPlus, RefreshCw, CheckCircle } from 'lucide-react';
 import { io } from 'socket.io-client';
 
-const socket = io('http://localhost:8000');
+const socket = io('http://127.0.0.1:8000', {
+    transports: ['websocket']
+});
 
 const Contactos = () => {
     const [contacts, setContacts] = useState([]);
@@ -16,7 +18,7 @@ const Contactos = () => {
 
     const fetchContacts = useCallback(() => {
         const token = localStorage.getItem('token');
-        fetch('http://localhost:8000/api/contacts', {
+        fetch('http://127.0.0.1:8000/api/contacts', {
             headers: { 'Authorization': `Bearer ${token}` }
         })
             .then(res => res.json())
@@ -62,9 +64,13 @@ const Contactos = () => {
     const saveContactChanges = async () => {
         setIsSaving(true);
         try {
-            const response = await fetch(`http://localhost:8000/api/contacts/${selectedContact.id}`, {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`http://127.0.0.1:8000/api/contacts/${selectedContact.id}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify({ notes: editNote })
             });
             if (response.ok) {

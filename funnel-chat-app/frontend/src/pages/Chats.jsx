@@ -2,7 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Send, Image, Smile, Paperclip } from 'lucide-react';
 import io from 'socket.io-client';
 
-const socket = io('http://localhost:8000');
+const socket = io('http://127.0.0.1:8000', {
+    transports: ['websocket']
+});
 
 const Chats = () => {
     const [contacts, setContacts] = useState([]);
@@ -13,7 +15,10 @@ const Chats = () => {
 
     // Cargar contactos al inicio
     useEffect(() => {
-        fetch('http://localhost:8000/api/contacts')
+        const token = localStorage.getItem('token');
+        fetch('http://127.0.0.1:8000/api/contacts', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        })
             .then(res => res.json())
             .then(data => {
                 setContacts(data);
@@ -24,8 +29,11 @@ const Chats = () => {
 
     const handleSelectContact = (contact) => {
         setActiveContact(contact);
+        const token = localStorage.getItem('token');
         // Cargar historial del contacto
-        fetch(`http://localhost:8000/api/chat/${contact.id}`)
+        fetch(`http://127.0.0.1:8000/api/chat/${contact.id}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        })
             .then(res => res.json())
             .then(data => setMessages(data))
             .catch(err => console.error("Error fetching history:", err));
@@ -33,13 +41,27 @@ const Chats = () => {
 
     useEffect(() => {
         socket.on('response', (data) => {
-            if (activeContact && data.contact_id === activeContact.id) {
+            if (activeContact && (data.contact_id === activeContact.id || data.contact_id === activeContact.number)) {
                 setMessages(prev => [...prev, { id: Date.now(), text: data.text, sender: 'bot' }]);
             }
         });
 
-        return () => socket.off('response');
+        socket.on('history_ready', (data) => {
+            if (activeContact && (data.contact_id === activeContact.id || data.contact_id === activeContact.number)) {
+                console.log(">>> HISTORIAL RECIBIDO Y LISTO PARA MOSTRAR");
+                setMessages(data.history);
+            }
+        });
+
+        return () => {
+            socket.off('response');
+            socket.off('history_ready');
+        };
     }, [activeContact]);
+
+    useEffect(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [messages]);
 
     const handleSend = () => {
         if (!inputValue.trim() || !activeContact) return;
