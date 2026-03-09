@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+venv/
+env/
+.env.local
+.env
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database
+*.db
+*.sqlite
+
+# Logs
+*.log
+
+# Session files
+*.session
+*.session-journal
+
+# WhatsApp Bridge
+whatsapp-bridge/chrome/
+whatsapp-bridge/wa-demo-token
+whatsapp-bridge/.wwebjs_cache
+
+# Claude
+.claude/

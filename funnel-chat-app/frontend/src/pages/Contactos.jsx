@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Search, Filter, UserPlus, RefreshCw, CheckCircle } from 'lucide-react';
 import { io } from 'socket.io-client';
+import { API_URL, SOCKET_URL } from '../config/api';
 
-const socket = io('http://127.0.0.1:8000', {
+const socket = io(SOCKET_URL, {
     transports: ['websocket']
 });
 
@@ -18,7 +19,7 @@ const Contactos = () => {
 
     const fetchContacts = useCallback(() => {
         const token = localStorage.getItem('token');
-        fetch('http://127.0.0.1:8000/api/contacts', {
+        fetch(`${API_URL}/api/contacts`, {
             headers: { 'Authorization': `Bearer ${token}` }
         })
             .then(res => res.json())

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Send, Users, MessageSquare, Calendar, TrendingUp, Plus, Clock, CheckCircle, BarChart2 } from 'lucide-react';
+import { API_URL } from '../config/api';
 
 const Difusion = () => {
     const [campaigns, setCampaigns] = useState([]);
@@ -12,7 +13,7 @@ const Difusion = () => {
     const [isSending, setIsSending] = useState(false);
 
     useEffect(() => {
-        fetch('http://localhost:8000/api/campaigns')
+        fetch(`${API_URL}/api/campaigns`)
             .then(res => res.json())
             .then(data => setCampaigns(data))
             .catch(err => console.error("Error fetching campaigns:", err));
@@ -23,7 +24,7 @@ const Difusion = () => {
         // Simulación de envío antes de guardar
         setTimeout(async () => {
             try {
-                const response = await fetch('http://localhost:8000/api/campaigns', {
+                const response = await fetch(`${API_URL}/api/campaigns`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
