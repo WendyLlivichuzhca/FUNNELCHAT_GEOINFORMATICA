@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Image, Smile, Paperclip, Search, Check, CheckCheck, MoreVertical, Play, Download, FileText, ArrowLeft } from 'lucide-react';
+import { Send, Image, Smile, Paperclip, Search, Check, CheckCheck, MoreVertical, Play, Download, FileText, ArrowLeft, MessageSquare } from 'lucide-react';
 import io from 'socket.io-client';
 
 const socket = io('http://127.0.0.1:8000', {
@@ -351,75 +351,74 @@ const Chats = () => {
 
     return (
         <div className="animate-fade-in" style={{
-            height: 'calc(100vh - 100px)',
+            height: 'calc(100vh - 80px)',
             display: 'flex',
-            background: 'rgba(10, 11, 20, 0.4)',
-            backdropFilter: 'blur(10px)',
-            borderRadius: '24px',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            background: 'var(--bg-card)',
+            backdropFilter: 'var(--glass-blur)',
+            borderRadius: '20px',
+            border: '1px solid var(--border-subtle)',
             overflow: 'hidden',
-            margin: '20px'
+            margin: '0 0 20px 0',
+            boxShadow: '0 20px 50px -12px rgba(0,0,0,0.5)'
         }}>
             {isSyncing && (
                 <div style={{
                     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                    backgroundColor: 'rgba(10, 11, 20, 0.9)',
-                    backdropFilter: 'blur(8px)', zIndex: 1000,
+                    backgroundColor: 'rgba(10, 10, 20, 0.95)',
+                    backdropFilter: 'blur(12px)', zIndex: 1000,
                     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center'
                 }}>
-                    <div style={{ width: '300px', textAlign: 'center' }}>
-                        <div className="spin-slow" style={{ width: '60px', height: '60px', margin: '0 auto 20px', background: 'var(--primary-gradient)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 20px rgba(99, 102, 241, 0.3)' }}>
+                    <div style={{ width: '320px', textAlign: 'center' }}>
+                        <div className="spin-slow" style={{ width: '64px', height: '64px', margin: '0 auto 24px', background: 'var(--primary-gradient)', borderRadius: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 30px rgba(99, 102, 241, 0.3)' }}>
                             <Smile size={32} color="white" />
                         </div>
-                        <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '8px', color: 'white' }}>Sincronizando WhatsApp</h2>
-                        <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '14px', marginBottom: '24px' }}>{syncMessage}</p>
-                        <div style={{ width: '100%', height: '6px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden', marginBottom: '12px' }}>
-                            <div style={{ width: `${syncProgress}%`, height: '100%', background: 'var(--primary-gradient)', transition: 'width 0.4s ease-out' }} />
+                        <h2 className="heading-xl" style={{ marginBottom: '8px' }}>Optimizando Chats</h2>
+                        <p className="text-small" style={{ marginBottom: '28px' }}>{syncMessage}</p>
+                        <div style={{ width: '100%', height: '6px', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '10px', overflow: 'hidden', marginBottom: '14px' }}>
+                            <div style={{ width: `${syncProgress}%`, height: '100%', background: 'var(--primary-gradient)', transition: 'width 0.4s ease-out', boxShadow: '0 0 10px var(--primary)' }} />
                         </div>
-                        <div style={{ fontSize: '12px', color: 'var(--primary)', fontWeight: 'bold' }}>{syncProgress}%</div>
+                        <div style={{ fontSize: '13px', color: 'var(--primary)', fontWeight: '800' }}>{syncProgress}%</div>
                     </div>
                 </div>
             )}
 
             <div style={{
-                width: '350px',
-                borderRight: '1px solid rgba(255, 255, 255, 0.1)',
+                width: '360px',
+                borderRight: '1px solid var(--border-subtle)',
                 display: 'flex',
                 flexDirection: 'column',
-                background: 'rgba(255, 255, 255, 0.02)'
+                background: 'rgba(255, 255, 255, 0.01)'
             }}>
-                <div style={{ padding: '24px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                        <h3 style={{ fontSize: '22px', fontWeight: '800', background: 'linear-gradient(to right, #fff, #818cf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Chats</h3>
-                        <MoreVertical size={20} color="rgba(255,255,255,0.4)" style={{ cursor: 'pointer' }} />
+                <div style={{ padding: '28px 24px', borderBottom: '1px solid var(--border-subtle)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                        <h3 className="heading-xl">Mensajes</h3>
+                        <div className="p-2 hover:bg-white/5 rounded-lg cursor-pointer transition-colors">
+                            <MoreVertical size={20} className="text-slate-500" />
+                        </div>
                     </div>
                     <div style={{ position: 'relative' }}>
-                        <Search size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.3)' }} />
+                        <Search size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
                         <input
                             type="text"
                             placeholder="Buscar chats o mensajes..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
+                            className="input-styled"
                             style={{
                                 width: '100%',
-                                padding: '12px 16px 12px 48px',
-                                borderRadius: '16px',
-                                background: 'rgba(255,255,255,0.05)',
-                                border: '1px solid rgba(255,255,255,0.1)',
-                                color: 'white',
-                                fontSize: '14px',
-                                outline: 'none'
+                                paddingLeft: '48px',
+                                fontSize: '14px'
                             }}
                         />
                     </div>
                 </div>
 
-                <div className="custom-scrollbar" style={{ flex: 1, overflowY: 'auto', padding: '12px' }}>
+                <div className="custom-scrollbar" style={{ flex: 1, overflowY: 'auto', padding: '16px 12px' }}>
                     {/* Resultados de Búsqueda Global */}
                     {searchResults && (
-                        <div style={{ marginBottom: '16px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px', color: 'var(--primary)', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                <Search size={14} /> Mensajes encontrados ({searchResults.length})
+                        <div style={{ marginBottom: '20px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', color: 'var(--primary)', fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>
+                                <Search size={14} /> Resultados ({searchResults.length})
                             </div>
                             {searchResults.map((res, i) => (
                                 <div
@@ -429,20 +428,21 @@ const Chats = () => {
                                         if (c) handleSelectContact(c);
                                     }}
                                     style={{
-                                        padding: '14px', borderRadius: '18px', cursor: 'pointer', marginBottom: '4px',
-                                        background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', transition: 'all 0.2s'
+                                        padding: '14px', borderRadius: '14px', cursor: 'pointer', marginBottom: '6px',
+                                        background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-subtle)', transition: 'all 0.2s'
                                     }}
+                                    className="hover:bg-white/5"
                                 >
-                                    <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'white', marginBottom: '2px' }}>{res.contact_name}</div>
-                                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                                    <div className="heading-base" style={{ fontSize: '14px', marginBottom: '2px' }}>{res.contact_name}</div>
+                                    <div className="text-small" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                                         {res.message.text}
                                     </div>
-                                    <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginTop: '4px', textAlign: 'right' }}>
+                                    <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '6px', textAlign: 'right', fontWeight: '600' }}>
                                         {formatTime(res.message.timestamp)}
                                     </div>
                                 </div>
                             ))}
-                            <div style={{ height: '1px', background: 'rgba(255,255,255,0.05)', margin: '12px 14px' }} />
+                            <div style={{ height: '1px', background: 'var(--border-subtle)', margin: '16px 12px' }} />
                         </div>
                     )}
 
@@ -455,45 +455,48 @@ const Chats = () => {
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: '14px',
-                                padding: '14px',
-                                borderRadius: '18px',
+                                padding: '14px 16px',
+                                borderRadius: '16px',
                                 cursor: 'pointer',
                                 marginBottom: '4px',
-                                background: activeContact?.whatsapp_id === contact.whatsapp_id ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
+                                background: activeContact?.whatsapp_id === contact.whatsapp_id ? 'rgba(99, 102, 241, 0.08)' : 'transparent',
                                 transition: 'all 0.2s',
                                 border: '1px solid',
-                                borderColor: activeContact?.whatsapp_id === contact.whatsapp_id ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
+                                borderColor: activeContact?.whatsapp_id === contact.whatsapp_id ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
                             }}
+                            className={activeContact?.whatsapp_id === contact.whatsapp_id ? '' : 'hover:bg-white/5'}
                         >
                             <div style={{
-                                width: '52px',
-                                height: '52px',
-                                borderRadius: '16px',
+                                width: '48px',
+                                height: '48px',
+                                borderRadius: '14px',
                                 background: getAvatarColor(contact.whatsapp_id || contact.id),
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
-                                fontSize: '20px',
-                                fontWeight: 'bold',
-                                flexShrink: 0
+                                fontSize: '18px',
+                                fontWeight: '800',
+                                color: 'white',
+                                flexShrink: 0,
+                                boxShadow: activeContact?.whatsapp_id === contact.whatsapp_id ? '0 8px 16px -4px rgba(0,0,0,0.3)' : 'none'
                             }}>
                                 {contact.name?.charAt(0) || '?'}
                             </div>
                             <div style={{ flex: 1, overflow: 'hidden' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                                    <h4 style={{ fontSize: '15px', fontWeight: '700', color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    <h4 className="heading-base" style={{ fontSize: '14.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                         {contact.name || contact.phone || 'Desconocido'}
                                     </h4>
-                                    <span style={{ fontSize: '11px', color: contact.unread_count > 0 ? 'var(--primary)' : 'rgba(255,255,255,0.4)' }}>
+                                    <span style={{ fontSize: '11px', fontWeight: '600', color: contact.unread_count > 0 ? 'var(--primary)' : 'var(--text-secondary)' }}>
                                         {formatTime(contact.timestamp)}
                                     </span>
                                 </div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.5)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    <p className="text-small" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '13px' }}>
                                         {contact.last_message || 'Sin mensajes'}
                                     </p>
                                     {contact.unread_count > 0 && (
-                                        <div style={{ background: 'var(--primary)', color: 'white', fontSize: '11px', fontWeight: 'bold', minWidth: '20px', height: '20px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px' }}>
+                                        <div style={{ background: 'var(--primary)', color: 'white', fontSize: '10px', fontWeight: '900', minWidth: '18px', height: '18px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px', boxShadow: '0 4px 8px rgba(99, 102, 241, 0.4)' }}>
                                             {contact.unread_count}
                                         </div>
                                     )}
@@ -502,45 +505,57 @@ const Chats = () => {
                         </div>
                     ))}
                     {!searchResults && filteredContacts.length === 0 && (
-                        <div style={{ textAlign: 'center', padding: '40px 20px', color: 'rgba(255,255,255,0.2)' }}>
+                        <div style={{ textAlign: 'center', padding: '60px 20px' }} className="text-small">
                             No se encontraron contactos
                         </div>
                     )}
                 </div>
             </div>
 
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'rgba(0,0,0,0.1)' }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'rgba(0,0,0,0.05)' }}>
                 {activeContact ? (
                     <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'rgba(0,0,0,0.1)' }}>
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
                             <div
                                 onClick={() => setShowInfoPanel(!showInfoPanel)}
                                 style={{
-                                    padding: '16px 24px',
-                                    borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                                    padding: '18px 28px',
+                                    borderBottom: '1px solid var(--border-subtle)',
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'space-between',
-                                    background: 'rgba(255,255,255,0.02)',
-                                    cursor: 'pointer'
+                                    background: 'var(--bg-card)',
+                                    cursor: 'pointer',
+                                    zIndex: 10
                                 }}
                             >
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                                    <div style={{ width: '44px', height: '44px', borderRadius: '14px', background: getAvatarColor(activeContact.whatsapp_id || activeContact.id), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', fontWeight: 'bold' }}>
+                                    <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: getAvatarColor(activeContact.whatsapp_id || activeContact.id), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', fontWeight: '800', color: 'white' }}>
                                         {activeContact.name?.charAt(0) || '?'}
                                     </div>
                                     <div>
-                                        <h3 style={{ fontSize: '16px', fontWeight: '700', color: 'white' }}>{activeContact.name || activeContact.phone}</h3>
-                                        <span style={{ fontSize: '11px', color: '#10b981' }}>En línea</span>
+                                        <h3 className="heading-base" style={{ fontSize: '15.5px' }}>{activeContact.name || activeContact.phone}</h3>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--success)', boxShadow: '0 0 8px var(--success)' }}></div>
+                                            <span style={{ fontSize: '11px', color: 'var(--success)', fontWeight: '700', letterSpacing: '0.02em' }}>En línea</span>
+                                        </div>
                                     </div>
                                 </div>
-                                <div style={{ display: 'flex', gap: '16px' }}>
-                                    <Search size={20} color="rgba(255,255,255,0.4)" style={{ cursor: 'pointer' }} />
-                                    <MoreVertical size={20} color="rgba(255,255,255,0.4)" style={{ cursor: 'pointer' }} />
+                                <div style={{ display: 'flex', gap: '20px' }}>
+                                    <Search size={19} className="text-slate-500 hover:text-indigo-400 transition-colors" />
+                                    <MoreVertical size={19} className="text-slate-500 hover:text-indigo-400 transition-colors" />
                                 </div>
                             </div>
 
-                            <div className="custom-scrollbar" style={{ flex: 1, padding: '24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <div className="custom-scrollbar" style={{
+                                flex: 1,
+                                padding: '32px 28px',
+                                overflowY: 'auto',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '4px',
+                                backgroundImage: 'radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.03) 0%, transparent 100%)'
+                            }}>
                                 {messages.map((msg, idx) => {
                                     const isBot = msg.sender === 'bot';
                                     const sameAsPrev = idx > 0 && messages[idx - 1].sender === msg.sender;
@@ -549,32 +564,36 @@ const Chats = () => {
                                     return (
                                         <div key={idx} style={{
                                             alignSelf: isBot ? 'flex-end' : 'flex-start',
-                                            maxWidth: '75%',
+                                            maxWidth: '70%',
                                             display: 'flex',
                                             flexDirection: 'column',
-                                            marginTop: sameAsPrev ? '2px' : '8px'
+                                            marginTop: sameAsPrev ? '2px' : '12px',
+                                            animation: 'fadeIn 0.3s ease-out'
                                         }}>
                                             <div style={{
-                                                padding: '8px 12px',
+                                                padding: '10px 14px',
                                                 borderRadius: isBot
-                                                    ? (sameAsPrev ? '8px' : '8px 0px 8px 8px')
-                                                    : (sameAsPrev ? '8px' : '0px 8px 8px 8px'),
-                                                background: isBot ? '#056162' : '#262d31',
-                                                color: 'white',
-                                                fontSize: '14.5px',
-                                                boxShadow: '0 1px 0.5px rgba(0,0,0,0.13)',
-                                                position: 'relative'
+                                                    ? (sameAsPrev ? '14px' : '14px 2px 14px 14px')
+                                                    : (sameAsPrev ? '14px' : '2px 14px 14px 14px'),
+                                                background: isBot ? 'var(--primary-gradient)' : 'var(--bg-hover)',
+                                                color: isBot ? 'white' : 'var(--text-title)',
+                                                fontSize: '14px',
+                                                fontWeight: isBot ? '500' : '400',
+                                                boxShadow: isBot ? '0 10px 15px -3px rgba(99, 102, 241, 0.2)' : '0 4px 6px -1px rgba(0,0,0,0.1)',
+                                                position: 'relative',
+                                                border: isBot ? 'none' : '1px solid var(--border-subtle)',
+                                                lineHeight: '1.5'
                                             }}>
                                                 {showName && (
-                                                    <div style={{ fontSize: '12px', fontWeight: 'bold', color: getAvatarColor(msg.participant), marginBottom: '2px' }}>
+                                                    <div style={{ fontSize: '11px', fontWeight: '800', color: getAvatarColor(msg.participant), marginBottom: '4px', letterSpacing: '0.02em' }}>
                                                         {msg.pushName || msg.participant?.split('@')[0]}
                                                     </div>
                                                 )}
-                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                                                     {msg.mediaType && msg.mediaType !== 'text' && <MediaMessage msg={msg} />}
-                                                    <div style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: '8px' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: '8px', justifyContent: 'space-between' }}>
                                                         <span style={{ flex: 1 }}>{msg.text}</span>
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: 'rgba(255,255,255,0.5)', marginTop: '4px', alignSelf: 'flex-end' }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: isBot ? 'rgba(255,255,255,0.7)' : 'var(--text-secondary)', marginTop: '4px', alignSelf: 'flex-end', fontWeight: '600' }}>
                                                             {formatTime(msg.timestamp)}
                                                             <StatusIcon status={msg.status} isBot={isBot} />
                                                         </div>
@@ -587,20 +606,48 @@ const Chats = () => {
                                 <div ref={chatEndRef} />
                             </div>
 
-                            <div style={{ padding: '20px 24px', borderTop: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', backgroundColor: 'rgba(255,255,255,0.05)', padding: '10px 20px', borderRadius: '18px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                                    <Smile size={22} style={{ color: 'rgba(255,255,255,0.4)', cursor: 'pointer' }} />
-                                    <Paperclip size={22} style={{ color: 'rgba(255,255,255,0.4)', cursor: 'pointer' }} />
+                            <div style={{ padding: '24px 28px', borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-card)' }}>
+                                <div style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '12px',
+                                    backgroundColor: 'var(--bg-hover)',
+                                    padding: '8px 16px',
+                                    borderRadius: '16px',
+                                    border: '1px solid var(--border-subtle)',
+                                    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)'
+                                }}>
+                                    <div className="p-2 hover:bg-white/5 rounded-full cursor-pointer transition-colors">
+                                        <Smile size={20} className="text-slate-500" />
+                                    </div>
+                                    <div className="p-2 hover:bg-white/5 rounded-full cursor-pointer transition-colors">
+                                        <Paperclip size={20} className="text-slate-500" />
+                                    </div>
                                     <input
                                         type="text"
                                         value={inputValue}
                                         onChange={(e) => setInputValue(e.target.value)}
                                         onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-                                        placeholder="Escribe un mensaje..."
-                                        style={{ flex: 1, background: 'transparent', border: 'none', color: 'white', outline: 'none', padding: '8px 0', fontSize: '15px' }}
+                                        placeholder="Escribe tu respuesta aquí..."
+                                        style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text-title)', outline: 'none', padding: '10px 0', fontSize: '14.5px' }}
                                     />
-                                    <div onClick={handleSend} style={{ width: '40px', height: '40px', background: inputValue.trim() ? 'var(--primary-gradient)' : 'rgba(255,255,255,0.1)', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-                                        <Send size={20} color="white" />
+                                    <div
+                                        onClick={handleSend}
+                                        style={{
+                                            width: '42px',
+                                            height: '42px',
+                                            background: inputValue.trim() ? 'var(--primary-gradient)' : 'rgba(255,255,255,0.05)',
+                                            borderRadius: '12px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            cursor: inputValue.trim() ? 'pointer' : 'default',
+                                            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                            boxShadow: inputValue.trim() ? '0 10px 15px -3px rgba(99, 102, 241, 0.3)' : 'none',
+                                            transform: inputValue.trim() ? 'scale(1)' : 'scale(0.95)'
+                                        }}
+                                    >
+                                        <Send size={18} color="white" style={{ transform: 'translateX(1px)' }} />
                                     </div>
                                 </div>
                             </div>
@@ -608,87 +655,102 @@ const Chats = () => {
 
                         {showInfoPanel && (
                             <div style={{
-                                width: '320px',
-                                borderLeft: '1px solid rgba(255, 255, 255, 0.1)',
-                                background: 'rgba(255, 255, 255, 0.02)',
+                                width: '340px',
+                                borderLeft: '1px solid var(--border-subtle)',
+                                background: 'var(--bg-card)',
                                 display: 'flex',
-                                flexDirection: 'column'
+                                flexDirection: 'column',
+                                animation: 'fadeIn 0.3s ease-out'
                             }}>
-                                <div style={{ padding: '24px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', display: 'flex', alignItems: 'center', gap: '16px' }}>
-                                    <ArrowLeft size={20} color="rgba(255,255,255,0.6)" style={{ cursor: 'pointer' }} onClick={() => setShowInfoPanel(false)} />
-                                    <h3 style={{ fontSize: '18px', fontWeight: '700', color: 'white' }}>Info. del contacto</h3>
+                                <div style={{ padding: '24px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                    <div className="p-2 hover:bg-white/5 rounded-lg cursor-pointer transition-colors" onClick={() => setShowInfoPanel(false)}>
+                                        <ArrowLeft size={18} className="text-slate-400" />
+                                    </div>
+                                    <h3 className="heading-base">Perfil del contacto</h3>
                                 </div>
-                                <div className="custom-scrollbar" style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
-                                    <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+                                <div className="custom-scrollbar" style={{ flex: 1, overflowY: 'auto', padding: '32px 24px' }}>
+                                    <div style={{ textAlign: 'center', marginBottom: '40px' }}>
                                         <div style={{
                                             width: '120px',
-                                            height: '120px',
-                                            borderRadius: '50%',
+                                            height: '110px',
+                                            borderRadius: '24px',
                                             background: getAvatarColor(activeContact.whatsapp_id || activeContact.id),
-                                            margin: '0 auto 20px',
+                                            margin: '0 auto 24px',
                                             display: 'flex',
                                             alignItems: 'center',
                                             justifyContent: 'center',
-                                            fontSize: '48px',
-                                            fontWeight: 'bold',
-                                            boxShadow: '0 8px 16px rgba(0,0,0,0.2)'
+                                            fontSize: '44px',
+                                            fontWeight: '900',
+                                            color: 'white',
+                                            boxShadow: '0 20px 40px -10px rgba(0,0,0,0.4)',
+                                            transform: 'rotate(-2deg)'
                                         }}>
                                             {activeContact.name?.charAt(0) || '?'}
                                         </div>
-                                        <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: 'white', marginBottom: '8px' }}>{activeContact.name}</h2>
-                                        <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.5)' }}>{activeContact.phone || activeContact.whatsapp_id}</p>
+                                        <h2 className="heading-xl" style={{ marginBottom: '6px' }}>{activeContact.name}</h2>
+                                        <p className="text-small" style={{ fontWeight: '600' }}>{activeContact.phone || activeContact.whatsapp_id}</p>
                                     </div>
 
-                                    <div style={{ marginBottom: '32px' }}>
-                                        <h4 style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '16px' }}>Notas CRM</h4>
+                                    <div style={{ marginBottom: '40px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+                                            <div style={{ width: '4px', height: '14px', background: 'var(--primary)', borderRadius: '4px' }}></div>
+                                            <h4 style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-subtitle)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Notas de Gestión</h4>
+                                        </div>
                                         <textarea
                                             value={contactNotes}
                                             onChange={(e) => setContactNotes(e.target.value)}
-                                            placeholder="Escribe notas sobre este cliente..."
+                                            placeholder="Añade recordatorios, preferencias o datos clave del cliente..."
+                                            className="input-styled"
                                             style={{
-                                                width: '100%', minHeight: '120px', background: 'rgba(255,255,255,0.05)',
-                                                border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', padding: '12px',
-                                                color: 'white', fontSize: '14px', outline: 'none', resize: 'vertical'
+                                                width: '100%', minHeight: '140px', padding: '14px',
+                                                fontSize: '13.5px', resize: 'none', lineHeight: '1.6'
                                             }}
                                         />
                                         <button
                                             onClick={handleSaveNotes}
+                                            className="btn-primary"
                                             style={{
-                                                width: '100%', marginTop: '12px', padding: '10px',
-                                                background: 'var(--primary-gradient)', border: 'none', borderRadius: '10px',
-                                                color: 'white', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer'
+                                                width: '100%', marginTop: '16px', justifyContent: 'center', fontSize: '13px'
                                             }}
                                         >
-                                            Guardar Notas
+                                            Actualizar Notas
                                         </button>
                                     </div>
 
                                     <div>
-                                        <h4 style={{ fontSize: '12px', fontWeight: 'bold', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '16px' }}>Detalles Técnicos</h4>
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                                                <span style={{ color: 'rgba(255,255,255,0.3)' }}>ID WhatsApp:</span>
-                                                <span style={{ color: 'rgba(255,255,255,0.7)', fontFamily: 'monospace' }}>{activeContact.whatsapp_id}</span>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+                                            <div style={{ width: '4px', height: '14px', background: 'var(--text-secondary)', borderRadius: '4px' }}></div>
+                                            <h4 style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Metadatos</h4>
+                                        </div>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                <span className="text-small" style={{ fontWeight: '600' }}>ID WhatsApp</span>
+                                                <span className="text-small" style={{ color: 'var(--text-subtitle)', fontFamily: 'monospace', background: 'var(--bg-hover)', padding: '2px 6px', borderRadius: '4px' }}>{activeContact.whatsapp_id?.split('@')[0]}</span>
                                             </div>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                                                <span style={{ color: 'rgba(255,255,255,0.3)' }}>Tipo:</span>
-                                                <span style={{ color: 'rgba(255,255,255,0.7)' }}>{activeContact.is_group ? 'Grupo' : 'Individual'}</span>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                <span className="text-small" style={{ fontWeight: '600' }}>Tipo de Chat</span>
+                                                <span style={{ fontSize: '10px', background: activeContact.is_group ? 'var(--accent)20' : 'var(--primary)20', color: activeContact.is_group ? 'var(--accent)' : 'var(--primary)', padding: '2px 8px', borderRadius: '6px', fontWeight: '800' }}>
+                                                    {activeContact.is_group ? 'GRUPO' : 'PERSONAL'}
+                                                </span>
                                             </div>
                                         </div>
                                     </div>
 
                                     {activeContact.is_group && activeContact.participants && (
-                                        <div style={{ marginTop: '32px' }}>
-                                            <h4 style={{ fontSize: '12px', fontWeight: 'bold', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '16px' }}>Participantes ({activeContact.participants.length})</h4>
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                        <div style={{ marginTop: '40px' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+                                                <div style={{ width: '4px', height: '14px', background: 'var(--success)', borderRadius: '4px' }}></div>
+                                                <h4 style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Participantes ({activeContact.participants.length})</h4>
+                                            </div>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                                                 {activeContact.participants.map((p, i) => (
-                                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                                        <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: getAvatarColor(p.id), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold' }}>
+                                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '8px', borderRadius: '12px' }} className="hover:bg-white/5 transition-colors">
+                                                        <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: getAvatarColor(p.id), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '900', color: 'white' }}>
                                                             {p.id.charAt(0)}
                                                         </div>
                                                         <div style={{ flex: 1, overflow: 'hidden' }}>
-                                                            <div style={{ fontSize: '13px', color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.id.split('@')[0]}</div>
-                                                            <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)' }}>{p.admin ? (p.admin === 'superadmin' ? 'Creador' : 'Admin') : 'Participante'}</div>
+                                                            <div className="text-main" style={{ fontSize: '13px', fontWeight: '600', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.id.split('@')[0]}</div>
+                                                            <div className="text-small" style={{ fontSize: '10px' }}>{p.admin ? (p.admin === 'superadmin' ? 'Creador' : 'Admin') : 'Miembro'}</div>
                                                         </div>
                                                     </div>
                                                 ))}
@@ -700,10 +762,12 @@ const Chats = () => {
                         )}
                     </div>
                 ) : (
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.2)' }}>
-                        <Send size={40} style={{ marginBottom: '20px' }} />
-                        <h3 style={{ fontSize: '20px', fontWeight: '700' }}>WhatsApp Web Clone</h3>
-                        <p>Selecciona una conversación para comenzar</p>
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', opacity: 0.5 }}>
+                        <div style={{ width: '80px', height: '80px', background: 'var(--bg-hover)', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '24px', border: '1px solid var(--border-subtle)' }}>
+                            <MessageSquare size={36} className="text-slate-500" />
+                        </div>
+                        <h3 className="heading-xl" style={{ marginBottom: '8px' }}>Tu Centro de Mensajes</h3>
+                        <p className="text-main">Selecciona una conversación para empezar a vender.</p>
                     </div>
                 )}
             </div>

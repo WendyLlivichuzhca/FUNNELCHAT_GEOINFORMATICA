@@ -7,6 +7,28 @@ const socket = io('http://127.0.0.1:8000', {
     autoConnect: true
 });
 
+const AVATAR_COLORS = [
+    '#7c3aed', '#10d9a0', '#f59e0b', '#ec4899', '#6366f1',
+    '#f43f5e', '#8b5cf6', '#10b981', '#f59e0b', '#06b6d4'
+];
+
+const getAvatarColor = (id) => {
+    if (!id) return AVATAR_COLORS[0];
+    const str = String(id);
+    const sum = str.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return AVATAR_COLORS[sum % AVATAR_COLORS.length];
+};
+
+const formatTime = (timestamp) => {
+    if (!timestamp) return "";
+    const date = new Date(timestamp * 1000);
+    const now = new Date();
+    if (date.toDateString() === now.toDateString()) {
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    return date.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
+};
+
 // Logs de depuración para la conexión del socket
 socket.on('connect', () => {
     console.log('>>> DASHBOARD CONECTADO AL BACKEND (SID:', socket.id, ')');
@@ -26,61 +48,281 @@ const data = [
     { name: 'Dom', leads: 40, conv: 45 },
 ];
 
+const CustomDot = (props) => {
+    const { cx, cy, stroke, payload, value } = props;
+    if (!cx || !cy) return null;
+
+    return (
+        <g>
+            <circle cx={cx} cy={cy} r={8} fill={stroke} fillOpacity={0.15}>
+                <animate attributeName="r" from="8" to="14" dur="1.5s" begin="0s" repeatCount="indefinite" />
+                <animate attributeName="opacity" from="0.4" to="0" dur="1.5s" begin="0s" repeatCount="indefinite" />
+            </circle>
+            <circle cx={cx} cy={cy} r={4} fill={stroke} stroke="#fff" strokeWidth={2} />
+        </g>
+    );
+};
+
+const RecentActivityCard = ({ chats }) => {
+    return (
+        <div className="animate-premium-entrance" style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '24px',
+            padding: '24px',
+            flex: '1',
+            minWidth: '320px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '20px',
+            animationDelay: '0.3s'
+        }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                    <h3 style={{ fontFamily: 'var(--font-syne)', fontSize: '18px', fontWeight: '800', color: '#fff' }}>Actividad Reciente</h3>
+                    <p style={{ fontFamily: 'var(--font-dm)', fontSize: '12px', color: 'var(--text-muted)' }}>Últimos mensajes de WhatsApp</p>
+                </div>
+                <button
+                    onClick={() => window.location.href = '/chats'}
+                    style={{ color: '#7c3aed', fontSize: '12px', fontWeight: '700', background: 'none', border: 'none', cursor: 'pointer' }}
+                >
+                    Ver todo
+                </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {chats.length > 0 ? chats.map((act) => (
+                    <div
+                        key={act.whatsapp_id || act.id}
+                        style={{ display: 'flex', alignItems: 'center', gap: '14px', cursor: 'pointer' }}
+                        className="group"
+                        onClick={() => window.location.href = `/chats?id=${act.id}`}
+                    >
+                        <div style={{
+                            width: '40px', height: '40px', borderRadius: '12px',
+                            backgroundColor: getAvatarColor(act.whatsapp_id || act.id),
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            color: '#fff', fontSize: '14px', fontWeight: '800', fontFamily: 'var(--font-syne)',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+                        }}>
+                            {act.name ? act.name[0] : '?'}
+                        </div>
+                        <div style={{ flex: 1, overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                                <span style={{ fontSize: '14px', fontWeight: '700', color: '#f1f5f9' }}>{act.name || 'Desconocido'}</span>
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{formatTime(act.timestamp)}</span>
+                            </div>
+                            <p style={{ fontSize: '12px', color: 'var(--text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', margin: 0 }}>
+                                {act.last_message || 'Sin mensajes'}
+                            </p>
+                        </div>
+                        {act.unread_count > 0 && (
+                            <div style={{
+                                width: '18px', height: '18px', borderRadius: '50%',
+                                background: '#7c3aed', color: '#fff', fontSize: '10px',
+                                fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                boxShadow: '0 0 10px rgba(124, 58, 237, 0.4)'
+                            }}>
+                                {act.unread_count}
+                            </div>
+                        )}
+                    </div>
+                )) : (
+                    <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)', fontSize: '13px' }}>
+                        Sin actividad de WhatsApp todavía
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
 const StatCard = ({ icon: Icon, label, value, color, delay }) => (
-    <div className={`glass-card p-6 flex items-center gap-4 animate-fade-in`} style={{ padding: '24px', animationDelay: delay }}>
+    <div
+        className="animate-premium-entrance"
+        style={{
+            padding: '24px',
+            animationDelay: delay,
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '24px',
+            position: 'relative',
+            overflow: 'hidden',
+            transition: 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+            cursor: 'default',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '20px'
+        }}
+        onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'translateY(-4px)';
+            e.currentTarget.style.borderColor = 'rgba(124, 58, 237, 0.4)';
+            e.currentTarget.style.boxShadow = '0 12px 30px -10px rgba(0,0,0,0.5), 0 0 0 1px rgba(124, 58, 237, 0.1) inset';
+        }}
+        onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.borderColor = 'var(--border-subtle)';
+            e.currentTarget.style.boxShadow = 'none';
+        }}
+    >
+        {/* Border Highlight Superior */}
         <div style={{
-            backgroundColor: `${color}15`,
+            position: 'absolute', top: 0, left: '10%', right: '10%', height: '1px',
+            background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent)'
+        }} />
+
+        {/* Corner Glow Radial */}
+        <div style={{
+            position: 'absolute', top: '-20px', right: '-20px', width: '100px', height: '100px',
+            background: `radial-gradient(circle at center, ${color}25, transparent 70%)`,
+            filter: 'blur(30px)', zIndex: 0
+        }} />
+
+        <div style={{
+            backgroundColor: `${color}10`,
             padding: '14px',
             borderRadius: '16px',
             color: color,
-            boxShadow: `0 8px 16px -4px ${color}30`
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            position: 'relative',
+            zIndex: 1,
+            border: `1px solid ${color}20`
         }}>
-            <Icon size={24} />
+            <Icon size={24} style={{ filter: `drop-shadow(0 0 8px ${color}40)` }} />
         </div>
-        <div>
-            <p style={{ color: 'var(--text-muted)', fontSize: '14px', fontWeight: '500' }}>{label}</p>
-            <h3 style={{ fontSize: '26px', fontWeight: 'bold', marginTop: '4px', letterSpacing: '-0.5px' }}>{value}</h3>
+        <div style={{ position: 'relative', zIndex: 1 }}>
+            <p style={{
+                fontFamily: 'var(--font-dm)',
+                fontSize: '12px',
+                fontWeight: '700',
+                color: 'var(--text-muted)',
+                textTransform: 'uppercase',
+                letterSpacing: '1px',
+                marginBottom: '4px'
+            }}>{label}</p>
+            <h3 style={{
+                fontFamily: 'var(--font-syne)',
+                fontSize: '28px',
+                fontWeight: '800',
+                color: '#fff',
+                letterSpacing: '-0.02em',
+                margin: 0
+            }}>{value}</h3>
         </div>
     </div>
 );
 
 const ConnectionCard = ({ device, onToggle }) => {
     const isConnected = device.status.toLowerCase() === 'conectado';
+    const statusBaseColor = isConnected ? '#10d9a0' : '#ef4444';
+
     return (
-        <div className="glass-card" style={{ padding: '24px', minWidth: '280px', flex: 1 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+        <div
+            className="animate-premium-entrance"
+            style={{
+                padding: '28px',
+                minWidth: '320px',
+                flex: 1,
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '24px',
+                position: 'relative',
+                transition: 'all 0.3s ease'
+            }}
+        >
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px' }}>
                 <div style={{
-                    width: '48px', height: '48px', borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.03)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--glass-border)'
+                    width: '48px', height: '48px', borderRadius: '14px',
+                    background: 'rgba(255,255,255,0.03)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    border: '1px solid rgba(255,255,255,0.05)'
                 }}>
-                    <Smartphone size={24} color={isConnected ? '#10b981' : 'var(--text-muted)'} />
+                    <Smartphone size={22} color={isConnected ? '#7c3aed' : '#64748b'} />
                 </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                     <span style={{
-                        fontSize: '11px', padding: '4px 8px', borderRadius: '20px',
-                        background: isConnected ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                        color: isConnected ? '#10b981' : '#ef4444',
-                        border: `1px solid ${isConnected ? '#10b98130' : '#ef444430'}`,
-                        fontWeight: 'bold',
-                        textTransform: 'capitalize'
+                        fontSize: '10px',
+                        padding: '5px 12px',
+                        borderRadius: '100px',
+                        background: `${statusBaseColor}15`,
+                        color: statusBaseColor,
+                        border: `1px solid ${statusBaseColor}30`,
+                        fontWeight: '800',
+                        textTransform: 'uppercase',
+                        letterSpacing: '1px'
                     }}>
                         {device.status}
                     </span>
-                    <MoreVertical size={18} color="var(--text-muted)" style={{ cursor: 'pointer' }} />
+                    <div style={{
+                        width: '32px', height: '32px', borderRadius: '50%',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: '#64748b', cursor: 'pointer', transition: 'all 0.2s'
+                    }} onMouseEnter={(e) => e.target.style.background = 'rgba(255,255,255,0.05)'} onMouseLeave={(e) => e.target.style.background = 'transparent'}>
+                        <MoreVertical size={18} />
+                    </div>
                 </div>
             </div>
-            <h4 style={{ fontWeight: 'bold', fontSize: '16px', marginBottom: '4px' }}>{device.device_name}</h4>
-            <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>{device.phone || 'Sin registro'}</p>
+
+            <h4 style={{
+                fontFamily: 'var(--font-syne)',
+                fontSize: '18px',
+                fontWeight: '700',
+                color: '#fff',
+                marginBottom: '6px'
+            }}>{device.device_name}</h4>
+            <p style={{
+                fontFamily: 'var(--font-dm)',
+                fontSize: '13px',
+                color: 'var(--text-dim)',
+                marginBottom: '28px'
+            }}>{device.phone || 'Sin registro vinculado'}</p>
 
             <button
                 onClick={() => onToggle(device)}
-                className="btn"
+                className="btn-shimmer"
                 style={{
-                    width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--glass-border)',
-                    fontSize: '13px', fontWeight: '600'
+                    width: '100%',
+                    height: '50px',
+                    borderRadius: '14px',
+                    border: 'none',
+                    background: isConnected ? 'rgba(255,255,255,0.05)' : 'var(--primary-gradient)',
+                    color: isConnected ? '#94a3b8' : '#fff',
+                    fontFamily: 'var(--font-dm)',
+                    fontWeight: '700',
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '10px',
+                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    boxShadow: isConnected ? 'none' : '0 10px 20px -5px rgba(124, 58, 237, 0.4)'
+                }}
+                onMouseEnter={(e) => {
+                    if (!isConnected) {
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                        e.currentTarget.style.boxShadow = '0 15px 25px -5px rgba(124, 58, 237, 0.5)';
+                    } else {
+                        e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
+                    }
+                }}
+                onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = isConnected ? 'none' : '0 10px 20px -5px rgba(124, 58, 237, 0.4)';
+                    e.currentTarget.style.background = isConnected ? 'rgba(255,255,255,0.05)' : 'var(--primary-gradient)';
                 }}
             >
-                {isConnected ? 'Desconectar dispositivo' : 'Conectar número'}
+                {isConnected ? (
+                    <>
+                        <ExternalLink size={16} /> Desconectar dispositivo
+                    </>
+                ) : (
+                    <>
+                        <Plus size={18} /> Conectar número
+                    </>
+                )}
             </button>
         </div>
     );
@@ -198,13 +440,13 @@ const QRModal = ({ isOpen, onClose, onFinish, onLogout }) => {
             <div className="glass-card" style={{
                 width: '100%', maxWidth: step === 1 ? '700px' : '500px',
                 padding: '40px', display: 'flex', flexDirection: 'column', gap: '32px',
-                border: '1px solid rgba(255,255,255,0.1)', textAlign: 'center'
+                border: '1px solid var(--glass-border)', textAlign: 'center'
             }}>
                 {step === 1 ? (
                     <>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h3 style={{ fontSize: '28px', fontWeight: '800', textAlign: 'left' }}>Conecta tu WhatsApp Real</h3>
-                            <XCircle size={28} color="var(--text-muted)" style={{ cursor: 'pointer' }} onClick={onClose} />
+                            <h3 className="heading-xl">Conecta tu WhatsApp</h3>
+                            <XCircle size={28} className="text-secondary cursor-pointer" onClick={onClose} />
                         </div>
 
                         <div style={{ display: 'flex', gap: '40px', alignItems: 'center', textAlign: 'left' }}>
@@ -345,11 +587,11 @@ const ConnectDeviceModal = ({ isOpen, onClose, onConfirm, onQRLink, device }) =>
             display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
             padding: '20px', animation: 'fade-in 0.3s ease-out'
         }}>
-            <div className="glass-card" style={{ width: '100%', maxWidth: '520px', padding: 0, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+            <div className="glass-card" style={{ width: '100%', maxWidth: '520px', padding: 0, overflow: 'hidden', border: '1px solid var(--glass-border)' }}>
                 <div style={{ padding: '32px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <h3 style={{ fontSize: '24px', fontWeight: '800', letterSpacing: '-0.5px' }}>Conectar Dispositivo</h3>
-                        <XCircle size={24} color="var(--text-muted)" style={{ cursor: 'pointer' }} onClick={onClose} />
+                        <h3 className="heading-xl">Conectar Dispositivo</h3>
+                        <XCircle size={24} className="text-secondary cursor-pointer" onClick={onClose} />
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -407,6 +649,7 @@ const Dashboard = () => {
     const [syncProgress, setSyncProgress] = useState(0);
     const [syncMessage, setSyncMessage] = useState('');
     const [isSyncing, setIsSyncing] = useState(false);
+    const [recentChats, setRecentChats] = useState([]);
     const [isQRModalOpen, setIsQRModalOpen] = useState(false);
     const [selectedDevice, setSelectedDevice] = useState(null);
 
@@ -436,6 +679,15 @@ const Dashboard = () => {
             .then(data => setDevices(data))
             .catch(err => console.error("Error fetching devices:", err));
 
+        // Fetch recent chats
+        fetch('http://127.0.0.1:8000/api/contacts', { headers })
+            .then(res => res.json())
+            .then(data => {
+                const sorted = Array.isArray(data) ? [...data].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) : [];
+                setRecentChats(sorted.slice(0, 5));
+            })
+            .catch(err => console.error("Error fetching recent chats:", err));
+
         // Socket.io for Real-time Device Status
         socket.on('device_status', (data) => {
             console.log("Device status update received:", data);
@@ -446,7 +698,38 @@ const Dashboard = () => {
 
         socket.on('contacts_updated', (data) => {
             console.log("Contactos sincronizados correctamente:", data);
-            // alert(`¡Éxito! Se han sincronizado ${data.count} contactos reales de tu WhatsApp.`);
+            fetch('http://127.0.0.1:8000/api/contacts', { headers })
+                .then(res => res.json())
+                .then(data => {
+                    const sorted = [...data].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+                    setRecentChats(sorted.slice(0, 5));
+                });
+        });
+
+        socket.on('new_whatsapp_message', (data) => {
+            const jid = data.whatsapp_id || data.contact_id;
+            setRecentChats(prev => {
+                const existingIdx = prev.findIndex(c => (c.whatsapp_id || c.id) === jid);
+                if (existingIdx > -1) {
+                    const updatedContact = {
+                        ...prev[existingIdx],
+                        last_message: data.message.text,
+                        timestamp: data.message.timestamp,
+                        unread_count: data.unreadCount
+                    };
+                    const updatedChats = [...prev];
+                    updatedChats.splice(existingIdx, 1);
+                    return [updatedContact, ...updatedChats].slice(0, 5);
+                } else {
+                    fetch('http://127.0.0.1:8000/api/contacts', { headers })
+                        .then(res => res.json())
+                        .then(d => {
+                            const sorted = [...d].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+                            setRecentChats(sorted.slice(0, 5));
+                        });
+                    return prev;
+                }
+            });
         });
 
         socket.on('whatsapp_qr_ready', (data) => {
@@ -677,117 +960,222 @@ const Dashboard = () => {
                     onLogout={handleLogoutWhatsApp}
                 />
             )}
-            <header>
-                <h2 style={{ fontSize: '32px', fontWeight: '800', letterSpacing: '-1px' }}>
-                    Bienvenido, {localStorage.getItem('username') || 'Usuario'}
-                </h2>
-                <p style={{ color: 'var(--text-muted)', fontSize: '16px' }}>Aquí tienes el resumen de tu funnel hoy.</p>
+            <header style={{
+                marginBottom: '40px',
+                animationDelay: '0s',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+            }} className="animate-premium-entrance">
+                <div>
+                    <h2 style={{
+                        fontFamily: 'var(--font-syne)',
+                        fontSize: '34px',
+                        fontWeight: '800',
+                        color: '#fff',
+                        marginBottom: '8px',
+                        letterSpacing: '-0.03em'
+                    }}>
+                        Bienvenido, Admin 👋
+                    </h2>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div style={{ width: '8px', height: '8px', background: '#10d9a0', borderRadius: '50%', boxShadow: '0 0 10px #10d9a0', animation: 'pulse-green 2s infinite' }} />
+                        <p style={{ fontFamily: 'var(--font-dm)', color: 'var(--text-dim)', fontSize: '14px', fontWeight: '500' }}>
+                            Aquí tienes el resumen de tu funnel — Lunes 8 Mar, 2026
+                        </p>
+                    </div>
+                </div>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                    <button style={{
+                        backgroundColor: 'rgba(255,255,255,0.03)',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        borderRadius: '12px',
+                        padding: '10px 20px',
+                        color: '#94a3b8',
+                        fontFamily: 'var(--font-dm)',
+                        fontWeight: '600',
+                        fontSize: '14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        cursor: 'pointer'
+                    }}>
+                        <Smartphone size={18} /> Esta semana
+                    </button>
+                    <button style={{
+                        background: 'var(--primary-gradient)',
+                        border: 'none',
+                        borderRadius: '12px',
+                        padding: '10px 20px',
+                        color: '#fff',
+                        fontFamily: 'var(--font-dm)',
+                        fontWeight: '700',
+                        fontSize: '14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        cursor: 'pointer',
+                        boxShadow: '0 10px 20px -5px rgba(124, 58, 237, 0.4)'
+                    }}>
+                        <Plus size={18} /> Nueva Campaña
+                    </button>
+                </div>
             </header>
 
             {/* Stat Cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '24px' }}>
-                <StatCard icon={Users} label="Total Leads" value={stats.leads} color="#6366f1" delay="0s" />
-                <StatCard icon={MessageSquare} label="Conversaciones" value={stats.conversations} color="#10b981" delay="0.1s" />
-                <StatCard icon={TrendingUp} label="Tasa de Conv." value={stats.conversion_rate} color="#f59e0b" delay="0.2s" />
-                <StatCard icon={Zap} label="Automatizaciones" value={stats.automations} color="#ec4899" delay="0.3s" />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '24px', marginBottom: '40px' }}>
+                <StatCard icon={Users} label="Total Leads" value={stats.leads} color="#7c3aed" delay="0.05s" />
+                <StatCard icon={MessageSquare} label="Conversaciones" value={stats.conversations} color="#10d9a0" delay="0.1s" />
+                <StatCard icon={TrendingUp} label="Tasa de Conv." value={stats.conversion_rate} color="#f59e0b" delay="0.15s" />
+                <StatCard icon={Zap} label="Automatizaciones" value={stats.automations} color="#ec4899" delay="0.2s" />
             </div>
 
-            {/* Chart Section */}
-            <div className="glass-card" style={{ padding: '32px', minHeight: '450px', display: 'flex', flexDirection: 'column', gap: '32px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>Actividad Semanal</h3>
-                    <div style={{ display: 'flex', gap: '16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#6366f1' }}></div> Leads
+            {/* Chart and Activity Section */}
+            <div style={{ display: 'flex', gap: '24px', marginBottom: '48px', flexWrap: 'wrap' }}>
+                <div className="animate-premium-entrance" style={{
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '32px',
+                    padding: '32px',
+                    flex: '2.5',
+                    minWidth: '600px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '32px',
+                    animationDelay: '0.25s',
+                    position: 'relative',
+                    overflow: 'hidden'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
+                        <div>
+                            <h3 style={{ fontFamily: 'var(--font-syne)', fontSize: '20px', fontWeight: '800', color: '#fff' }}>Actividad Semanal</h3>
+                            <p style={{ fontFamily: 'var(--font-dm)', fontSize: '13px', color: 'var(--text-muted)' }}>Leads y conversiones por día</p>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }}></div> Conv.
+                        <div style={{ display: 'flex', gap: '20px', background: 'rgba(255,255,255,0.03)', padding: '6px 16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: '700', color: '#94a3b8' }}>
+                                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#7c3aed', boxShadow: '0 0 8px #7c3aed' }}></div> Leads
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: '700', color: '#94a3b8' }}>
+                                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10d9a0', boxShadow: '0 0 8px #10d9a0' }}></div> Conv.
+                            </div>
                         </div>
                     </div>
+
+                    <div style={{ width: '100%', height: '320px', position: 'relative', zIndex: 1 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                <defs>
+                                    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+                                        <feGaussianBlur stdDeviation="4" result="blur" />
+                                        <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                                    </filter>
+                                    <linearGradient id="colorLeads" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#7c3aed" stopOpacity={0.4} />
+                                        <stop offset="95%" stopColor="#7c3aed" stopOpacity={0} />
+                                    </linearGradient>
+                                    <linearGradient id="colorConv" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#10d9a0" stopOpacity={0.4} />
+                                        <stop offset="95%" stopColor="#10d9a0" stopOpacity={0} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.04)" strokeDasharray="0" />
+                                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11, fontWeight: '700' }} dy={15} />
+                                <YAxis hide />
+                                <Tooltip
+                                    cursor={{ stroke: 'rgba(255,255,255,0.1)', strokeWidth: 1 }}
+                                    contentStyle={{
+                                        backgroundColor: '#0d1320',
+                                        border: '1px solid rgba(255,255,255,0.08)',
+                                        borderRadius: '16px',
+                                        padding: '12px 16px',
+                                        boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+                                        fontFamily: 'var(--font-dm)'
+                                    }}
+                                />
+                                <Area type="monotone" dataKey="leads" stroke="#7c3aed" strokeWidth={4} fillOpacity={1} fill="url(#colorLeads)" filter="url(#glow)" activeDot={<CustomDot />} animationDuration={2000} />
+                                <Area type="monotone" dataKey="conv" stroke="#10d9a0" strokeWidth={4} fillOpacity={1} fill="url(#colorConv)" filter="url(#glow)" activeDot={<CustomDot />} animationDuration={2000} />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    </div>
                 </div>
-                <div style={{ width: '100%', height: '300px' }}> {/* Altura fija para Recharts */}
-                    <ResponsiveContainer width="100%" height="100%" debounce={50}>
-                        <AreaChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                            <defs>
-                                <linearGradient id="colorLeads" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
-                                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                                </linearGradient>
-                                <linearGradient id="colorConv" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                                </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.05)" />
-                            <XAxis
-                                dataKey="name"
-                                axisLine={false}
-                                tickLine={false}
-                                tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 12 }}
-                                dy={10}
-                            />
-                            <YAxis hide domain={[0, 'auto']} />
-                            <Tooltip
-                                contentStyle={{
-                                    backgroundColor: 'rgba(15, 23, 42, 0.9)',
-                                    border: '1px solid var(--glass-border)',
-                                    borderRadius: '12px',
-                                    backdropFilter: 'blur(8px)',
-                                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)'
-                                }}
-                                itemStyle={{ fontSize: '12px' }}
-                            />
-                            <Area
-                                type="monotone"
-                                dataKey="leads"
-                                stroke="#6366f1"
-                                strokeWidth={3}
-                                fillOpacity={1}
-                                fill="url(#colorLeads)"
-                                animationDuration={1500}
-                            />
-                            <Area
-                                type="monotone"
-                                dataKey="conv"
-                                stroke="#10b981"
-                                strokeWidth={3}
-                                fillOpacity={1}
-                                fill="url(#colorConv)"
-                                animationDuration={1500}
-                            />
-                        </AreaChart>
-                    </ResponsiveContainer>
-                </div>
+
+                <RecentActivityCard chats={recentChats} />
             </div>
 
             {/* Connections Section */}
-            <section>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-                    <h3 style={{ fontSize: '20px', fontWeight: 'bold' }}>Conexiones</h3>
-                    <button className="btn" style={{ fontSize: '13px', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>
+            <section className="animate-premium-entrance" style={{ animationDelay: '0.35s' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '28px' }}>
+                    <h3 style={{ fontFamily: 'var(--font-syne)', fontSize: '20px', fontWeight: '800', color: '#fff' }}>Conexiones</h3>
+                    <button style={{
+                        fontFamily: 'var(--font-dm)',
+                        fontSize: '12px',
+                        fontWeight: '700',
+                        color: '#7c3aed',
+                        background: 'rgba(124, 58, 237, 0.08)',
+                        padding: '8px 16px',
+                        borderRadius: '10px',
+                        border: '1px solid rgba(124, 58, 237, 0.2)',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s'
+                    }} onMouseEnter={(e) => e.target.style.background = 'rgba(124, 58, 237, 0.12)'} onMouseLeave={(e) => e.target.style.background = 'rgba(124, 58, 237, 0.08)'}>
                         Gestionar todas
                     </button>
                 </div>
                 <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
-                    {devices.map(device => (
+                    {devices.map((device, i) => (
                         <ConnectionCard
                             key={device.id}
                             device={device}
                             onToggle={toggleConnection}
                         />
                     ))}
-                    <div className="glass-card flex-center" style={{
-                        minWidth: '280px', flex: 1, border: '2px dashed var(--glass-border)',
-                        background: 'transparent', cursor: 'pointer', transition: 'all 0.3s',
-                        display: 'flex', flexDirection: 'column', gap: '12px', padding: '24px'
-                    }}>
+
+                    <div
+                        className="animate-premium-entrance"
+                        style={{
+                            minWidth: '320px', flex: 1,
+                            border: '2px dashed rgba(255,255,255,0.08)',
+                            background: 'rgba(255,255,255,0.02)',
+                            cursor: 'pointer',
+                            transition: 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+                            display: 'flex', flexDirection: 'column', gap: '16px', padding: '32px',
+                            alignItems: 'center', justifyContent: 'center',
+                            borderRadius: '24px',
+                            animationDelay: `${0.4 + (devices.length * 0.05)}s`
+                        }}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                            e.currentTarget.style.borderColor = 'rgba(124, 58, 237, 0.4)';
+                            e.currentTarget.style.transform = 'translateY(-2px)';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
+                            e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+                            e.currentTarget.style.transform = 'translateY(0)';
+                        }}
+                    >
                         <div style={{
-                            width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(255,255,255,0.03)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                            width: '52px', height: '52px', borderRadius: '16px', background: 'rgba(255,255,255,0.04)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,0.08)'
                         }}>
-                            <Plus size={24} color="var(--text-muted)" />
+                            <Plus size={24} color="#64748b" />
                         </div>
-                        <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>Mejorar plan</span>
+                        <div style={{ textAlign: 'center' }}>
+                            <span style={{
+                                display: 'block',
+                                fontFamily: 'var(--font-syne)',
+                                fontWeight: '700',
+                                color: '#fff',
+                                fontSize: '16px',
+                                marginBottom: '4px'
+                            }}>Nuevo Dispositivo</span>
+                            <span style={{
+                                display: 'block',
+                                fontFamily: 'var(--font-dm)',
+                                color: 'var(--text-muted)',
+                                fontSize: '13px'
+                            }}>Añade otra conexión</span>
+                        </div>
                     </div>
                 </div>
             </section>

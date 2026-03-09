@@ -44,14 +44,36 @@ function App() {
 
   return (
     <Router>
-      <div style={{ display: 'flex', width: '100%' }}>
+      <div style={{
+        display: 'flex',
+        width: '100%',
+        backgroundColor: 'var(--bg-base)',
+        position: 'relative',
+        minHeight: '100vh',
+        overflow: 'hidden'
+      }}>
+        {/* Capa de Ruido Global */}
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
+          opacity: 0.03, pointerEvents: 'none', zIndex: 1,
+          background: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3Y%3Cfilter id='noiseFilter'%3Y%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3Y%3C/filter%3Y%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3Y%3C/svg%3Y")`
+        }} />
+
+        {/* Glows Ambientales */}
+        <div style={{ position: 'fixed', top: '-10%', left: '-5%', width: '600px', height: '600px', background: 'rgba(124, 58, 237, 0.08)', borderRadius: '50%', filter: 'blur(120px)', pointerEvents: 'none', zIndex: 0 }} />
+        <div style={{ position: 'fixed', bottom: '-5%', right: '-5%', width: '400px', height: '400px', background: 'rgba(16, 217, 160, 0.05)', borderRadius: '50%', filter: 'blur(120px)', pointerEvents: 'none', zIndex: 0 }} />
+        <div style={{ position: 'fixed', top: '30%', right: '-5%', width: '300px', height: '300px', background: 'rgba(236, 72, 153, 0.04)', borderRadius: '50%', filter: 'blur(120px)', pointerEvents: 'none', zIndex: 0 }} />
+
         <Sidebar username={username} onLogout={handleLogout} />
+
         <main style={{
           flex: 1,
           marginLeft: '260px',
-          padding: '32px',
+          padding: '40px 60px',
           minHeight: '100vh',
-          background: 'radial-gradient(circle at top right, #1e293b, #0f172a)'
+          backgroundColor: 'transparent',
+          position: 'relative',
+          zIndex: 2
         }}>
           <Routes>
             <Route path="/" element={<Dashboard />} />

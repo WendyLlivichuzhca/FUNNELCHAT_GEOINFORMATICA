@@ -101,68 +101,63 @@ const Contactos = () => {
             {showSyncToast && (
                 <div style={{
                     position: 'fixed',
-                    top: '24px',
-                    right: '24px',
-                    backgroundColor: 'rgba(16, 185, 129, 0.95)',
-                    color: 'white',
+                    top: '28px',
+                    right: '28px',
+                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                    color: '#ffffff',
                     padding: '16px 24px',
                     borderRadius: '16px',
-                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(16, 185, 129, 0.2)',
+                    boxShadow: '0 20px 40px -10px rgba(0, 0, 0, 0.5)',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '12px',
+                    gap: '14px',
                     zIndex: 2000,
-                    backdropFilter: 'blur(8px)',
-                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                    backdropFilter: 'blur(16px)',
+                    border: '1px solid rgba(16, 185, 129, 0.3)',
                     animation: 'slide-in-right 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
                 }}>
                     <div style={{
-                        backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                        borderRadius: '50%',
-                        padding: '6px',
-                        display: 'flex'
+                        backgroundColor: 'var(--success)',
+                        borderRadius: '10px',
+                        padding: '8px',
+                        display: 'flex',
+                        boxShadow: '0 0 15px rgba(16, 185, 129, 0.4)'
                     }}>
-                        <CheckCircle size={20} />
+                        <CheckCircle size={20} color="white" />
                     </div>
                     <div>
-                        <p style={{ margin: 0, fontWeight: 'bold', fontSize: '14px' }}>¡Sincronización Completada!</p>
-                        <p style={{ margin: 0, fontSize: '12px', opacity: 0.9 }}>Se han añadido {syncCount} contactos nuevos.</p>
+                        <p className="heading-base" style={{ margin: 0, fontSize: '14px', color: 'white' }}>¡Sincronización Exitosa!</p>
+                        <p className="text-small" style={{ margin: 0, color: 'rgba(255,255,255,0.7)' }}>Añadidos {syncCount} contactos nuevos.</p>
                     </div>
                 </div>
             )}
 
             <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
                 <div>
-                    <h2 style={{ fontSize: '28px', fontWeight: 'bold' }}>Gestión de Contactos</h2>
-                    <p style={{ color: 'var(--text-muted)' }}>Administra y segmenta tus leads fácilmente.</p>
+                    <h2 className="heading-xl" style={{ fontSize: '28px' }}>Directorio de Leads</h2>
+                    <p className="text-main">Gestiona y segmenta tu base de clientes con precisión.</p>
                 </div>
-                <button className="btn btn-primary">
+                <button className="btn-primary">
                     <UserPlus size={18} />
-                    Nuevo Contacto
+                    Añadir Contacto
                 </button>
             </header>
 
-            <div className="glass-card" style={{ padding: '24px' }}>
-                <div style={{ display: 'flex', gap: '16px', marginBottom: '24px', flexWrap: 'wrap' }}>
-                    <div style={{ position: 'relative', flex: 1, minWidth: '250px' }}>
-                        <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <div className="glass-card" style={{ padding: '28px', border: '1px solid var(--border-subtle)' }}>
+                <div style={{ display: 'flex', gap: '20px', marginBottom: '28px', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <div style={{ position: 'relative', flex: 1, minWidth: '300px' }}>
+                        <Search size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
                         <input
                             type="text"
-                            placeholder="Buscar por nombre o correo..."
+                            placeholder="Buscar por nombre, correo o teléfono..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
+                            className="input-styled"
                             style={{
                                 width: '100%',
-                                backgroundColor: 'rgba(255,255,255,0.03)',
-                                border: '1px solid var(--glass-border)',
-                                borderRadius: '12px',
-                                padding: '12px 12px 12px 42px',
-                                color: 'white',
-                                outline: 'none',
-                                transition: 'all 0.2s'
+                                paddingLeft: '48px',
+                                fontSize: '14px'
                             }}
-                            onFocus={(e) => e.target.style.borderColor = 'var(--primary)'}
-                            onBlur={(e) => e.target.style.borderColor = 'var(--glass-border)'}
                         />
                     </div>
                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -170,14 +165,20 @@ const Contactos = () => {
                             <button
                                 key={filter}
                                 onClick={() => setActiveFilter(filter)}
-                                className="btn"
                                 style={{
-                                    background: activeFilter === filter ? 'var(--primary)' : 'var(--glass)',
-                                    border: '1px solid var(--glass-border)',
-                                    color: activeFilter === filter ? 'white' : 'var(--text-muted)',
-                                    padding: '8px 16px',
-                                    fontSize: '13px'
+                                    background: activeFilter === filter ? 'var(--primary-gradient)' : 'rgba(255,255,255,0.03)',
+                                    border: '1px solid',
+                                    borderColor: activeFilter === filter ? 'transparent' : 'var(--border-subtle)',
+                                    color: activeFilter === filter ? 'white' : 'var(--text-subtitle)',
+                                    padding: '10px 18px',
+                                    fontSize: '13px',
+                                    fontWeight: '700',
+                                    borderRadius: '12px',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.3s ease',
+                                    boxShadow: activeFilter === filter ? '0 10px 20px -5px rgba(99, 102, 241, 0.4)' : 'none'
                                 }}
+                                className={activeFilter === filter ? '' : 'hover:bg-white/5'}
                             >
                                 {filter === 'WhatsApp' ? '📱 WhatsApp' : filter}
                             </button>
@@ -185,69 +186,100 @@ const Contactos = () => {
                     </div>
                 </div>
 
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                        <tr style={{ borderBottom: '1px solid var(--surface-border)', textAlign: 'left' }}>
-                            <th style={{ padding: '12px', color: 'var(--text-muted)', fontWeight: '500' }}>Nombre</th>
-                            <th style={{ padding: '12px', color: 'var(--text-muted)', fontWeight: '500' }}>Teléfono / Email</th>
-                            <th style={{ padding: '12px', color: 'var(--text-muted)', fontWeight: '500' }}>Estado</th>
-                            <th style={{ padding: '12px', color: 'var(--text-muted)', fontWeight: '500' }}>Etiqueta</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {filteredContacts.map(contact => (
-                            <tr
-                                key={contact.id}
-                                onClick={() => handleSelectContact(contact)}
-                                style={{
-                                    borderBottom: '1px solid var(--surface-border)',
-                                    cursor: 'pointer',
-                                    transition: 'background 0.2s'
-                                }}
-                                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
-                                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                            >
-                                <td style={{ padding: '16px 12px' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                        <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--primary-gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold' }}>
-                                            {contact.name.charAt(0)}
-                                        </div>
-                                        {contact.name}
-                                    </div>
-                                </td>
-                                <td style={{ padding: '16px 12px', color: 'var(--text-muted)', fontSize: '13px' }}>
-                                    {contact.phone ? (
-                                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                            <span style={{ color: '#25D366', fontSize: '12px' }}>WA</span>
-                                            +{contact.phone}
-                                        </span>
-                                    ) : (contact.email || '-')}
-                                </td>
-                                <td style={{ padding: '16px 12px' }}>
-                                    <span style={{
-                                        padding: '4px 12px',
-                                        borderRadius: '20px',
-                                        fontSize: '11px',
-                                        fontWeight: '600',
-                                        backgroundColor: contact.status === 'Caliente' ? 'rgba(239, 68, 68, 0.1)' : contact.status === 'Tibio' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(59, 130, 246, 0.1)',
-                                        color: contact.status === 'Caliente' ? '#ef4444' : contact.status === 'Tibio' ? '#f59e0b' : '#3b82f6',
-                                        border: `1px solid ${contact.status === 'Caliente' ? 'rgba(239, 68, 68, 0.2)' : contact.status === 'Tibio' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(59, 130, 246, 0.2)'}`
-                                    }}>
-                                        {contact.status.toUpperCase()}
-                                    </span>
-                                </td>
-                                <td style={{ padding: '16px 12px' }}>
-                                    <span style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                                        {contact.tag}
-                                    </span>
-                                </td>
+                <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0 4px' }}>
+                        <thead>
+                            <tr style={{ textAlign: 'left' }}>
+                                <th className="text-small" style={{ padding: '12px 16px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Nombre y Perfil</th>
+                                <th className="text-small" style={{ padding: '12px 16px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Contacto</th>
+                                <th className="text-small" style={{ padding: '12px 16px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Estado de Lead</th>
+                                <th className="text-small" style={{ padding: '12px 16px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Etiqueta</th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {filteredContacts.map(contact => (
+                                <tr
+                                    key={contact.id}
+                                    onClick={() => handleSelectContact(contact)}
+                                    style={{
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                                    }}
+                                    className="hover:bg-white/5 group"
+                                >
+                                    <td style={{ padding: '16px', borderRadius: '12px 0 0 12px', borderTop: '1px solid transparent', borderBottom: '1px solid var(--border-subtle)' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                                            <div style={{
+                                                width: '40px',
+                                                height: '40px',
+                                                borderRadius: '12px',
+                                                background: 'var(--primary-gradient)',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                fontSize: '16px',
+                                                fontWeight: '900',
+                                                color: 'white',
+                                                boxShadow: '0 8px 15px -3px rgba(99, 102, 241, 0.3)'
+                                            }}>
+                                                {contact.name.charAt(0)}
+                                            </div>
+                                            <span className="heading-base" style={{ fontSize: '15px' }}>{contact.name}</span>
+                                        </div>
+                                    </td>
+                                    <td style={{ padding: '16px', borderBottom: '1px solid var(--border-subtle)' }}>
+                                        <div className="text-main" style={{ fontSize: '13.5px', fontWeight: '500' }}>
+                                            {contact.phone ? (
+                                                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                    <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#25D366' }}></div>
+                                                    <span style={{ color: 'var(--text-subtitle)' }}>+{contact.phone}</span>
+                                                </span>
+                                            ) : (
+                                                <span style={{ color: 'var(--text-secondary)' }}>{contact.email || '—'}</span>
+                                            )}
+                                        </div>
+                                    </td>
+                                    <td style={{ padding: '16px', borderBottom: '1px solid var(--border-subtle)' }}>
+                                        <span style={{
+                                            padding: '6px 14px',
+                                            borderRadius: '8px',
+                                            fontSize: '11px',
+                                            fontWeight: '800',
+                                            letterSpacing: '0.02em',
+                                            backgroundColor: contact.status === 'Caliente' ? 'rgba(239, 68, 68, 0.12)' : contact.status === 'Tibio' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(59, 130, 246, 0.12)',
+                                            color: contact.status === 'Caliente' ? 'var(--error)' : contact.status === 'Tibio' ? 'var(--warning)' : 'var(--info)',
+                                            border: '1px solid',
+                                            borderColor: contact.status === 'Caliente' ? 'rgba(239, 68, 68, 0.2)' : contact.status === 'Tibio' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(59, 130, 246, 0.2)'
+                                        }}>
+                                            {contact.status.toUpperCase()}
+                                        </span>
+                                    </td>
+                                    <td style={{ padding: '16px', borderRadius: '0 12px 12px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                                        <span style={{
+                                            backgroundColor: 'rgba(255,255,255,0.04)',
+                                            border: '1px solid var(--border-subtle)',
+                                            padding: '4px 12px',
+                                            borderRadius: '6px',
+                                            fontSize: '11px',
+                                            fontWeight: '700',
+                                            color: 'var(--text-secondary)',
+                                            textTransform: 'uppercase'
+                                        }}>
+                                            {contact.tag}
+                                        </span>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
                 {filteredContacts.length === 0 && (
-                    <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-                        No se encontraron contactos que coincidan con tu búsqueda.
+                    <div style={{ textAlign: 'center', padding: '80px 40px' }}>
+                        <div style={{ opacity: 0.2, marginBottom: '20px' }}>
+                            <Search size={48} style={{ margin: '0 auto' }} />
+                        </div>
+                        <p className="text-main" style={{ fontSize: '16px' }}>No se encontraron prospectos que coincidan con tu búsqueda.</p>
+                        <p className="text-small" style={{ marginTop: '8px' }}>Intenta con otros filtros o términos generales.</p>
                     </div>
                 )}
             </div>
@@ -255,66 +287,104 @@ const Contactos = () => {
             {/* Slide-over Detail Panel */}
             {selectedContact && (
                 <div
-                    style={{ position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100, backdropFilter: 'blur(4px)' }}
+                    style={{ position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, background: 'rgba(5, 5, 10, 0.8)', zIndex: 100, backdropFilter: 'blur(10px)' }}
                     onClick={() => setSelectedContact(null)}
                 >
                     <div
-                        className="glass-card animate-slide-in"
+                        className="glass-card"
                         style={{
-                            position: 'absolute', right: 0, top: 0, bottom: 0, width: '450px',
-                            background: 'var(--surface)', padding: '40px', borderLeft: '1px solid var(--glass-border)',
-                            display: 'flex', flexDirection: 'column', gap: '32px'
+                            position: 'absolute', right: 0, top: 0, bottom: 0, width: '480px',
+                            background: 'var(--bg-card)', padding: '50px 40px', borderLeft: '1px solid var(--border-subtle)',
+                            display: 'flex', flexDirection: 'column', gap: '40px',
+                            animation: 'slide-in-right 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
+                            boxShadow: '-40px 0 80px -20px rgba(0,0,0,0.8)'
                         }}
                         onClick={e => e.stopPropagation()}
                     >
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                                <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'var(--primary-gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', fontWeight: 'bold' }}>
+                            <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
+                                <div style={{
+                                    width: '72px',
+                                    height: '72px',
+                                    borderRadius: '20px',
+                                    background: 'var(--primary-gradient)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: '28px',
+                                    fontWeight: '900',
+                                    color: 'white',
+                                    boxShadow: '0 15px 30px -5px rgba(99, 102, 241, 0.4)',
+                                    transform: 'rotate(-3deg)'
+                                }}>
                                     {selectedContact.name.charAt(0)}
                                 </div>
                                 <div>
-                                    <h3 style={{ fontSize: '24px', fontWeight: 'bold' }}>{selectedContact.name}</h3>
-                                    <p style={{ color: 'var(--text-muted)' }}>{selectedContact.email}</p>
+                                    <h3 className="heading-xl" style={{ fontSize: '26px', marginBottom: '4px' }}>{selectedContact.name}</h3>
+                                    <p className="text-main" style={{ fontWeight: '600', color: 'var(--primary)' }}>{selectedContact.email || 'Lead de WhatsApp'}</p>
                                 </div>
                             </div>
-                            <button onClick={() => setSelectedContact(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '20px' }}>✕</button>
+                            <button onClick={() => setSelectedContact(null)} style={{
+                                background: 'rgba(255,255,255,0.05)',
+                                border: 'none',
+                                color: 'var(--text-secondary)',
+                                cursor: 'pointer',
+                                padding: '8px',
+                                borderRadius: '10px',
+                                display: 'flex'
+                            }} className="hover:bg-white/10 transition-colors">
+                                <RefreshCw size={20} style={{ transform: 'rotate(45deg)' }} />
+                            </button>
                         </div>
 
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                            <div style={{ padding: '16px', borderRadius: '12px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--glass-border)' }}>
-                                <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>ESTADO</p>
-                                <p style={{ fontWeight: 'bold', color: selectedContact.status === 'Caliente' ? '#ef4444' : '#3b82f6' }}>{selectedContact.status}</p>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                            <div style={{ padding: '20px', borderRadius: '16px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-subtle)' }}>
+                                <p className="text-small" style={{ fontWeight: '800', marginBottom: '8px', letterSpacing: '0.05em' }}>PRIORIDAD</p>
+                                <p className="heading-base" style={{ color: selectedContact.status === 'Caliente' ? 'var(--error)' : 'var(--info)', fontSize: '18px' }}>{selectedContact.status}</p>
                             </div>
-                            <div style={{ padding: '16px', borderRadius: '12px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--glass-border)' }}>
-                                <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>ETIQUETA</p>
-                                <p style={{ fontWeight: 'bold' }}>{selectedContact.tag}</p>
+                            <div style={{ padding: '20px', borderRadius: '16px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-subtle)' }}>
+                                <p className="text-small" style={{ fontWeight: '800', marginBottom: '8px', letterSpacing: '0.05em' }}>CATEGORÍA</p>
+                                <p className="heading-base" style={{ fontSize: '18px' }}>{selectedContact.tag}</p>
                             </div>
                         </div>
 
                         <div>
-                            <h4 style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '1px' }}>Notas Internas</h4>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+                                <div style={{ width: '4px', height: '14px', background: 'var(--primary)', borderRadius: '4px' }}></div>
+                                <h4 style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-subtitle)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Notas del CRM</h4>
+                            </div>
                             <textarea
                                 value={editNote}
                                 onChange={(e) => setEditNote(e.target.value)}
-                                placeholder="Añade una nota sobre este contacto..."
+                                placeholder="Registra hitos, objeciones o detalles cruciales..."
+                                className="input-styled"
                                 style={{
-                                    width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--glass-border)',
-                                    borderRadius: '12px', padding: '16px', color: 'white', minHeight: '120px', resize: 'none', outline: 'none'
+                                    width: '100%', minHeight: '160px', padding: '18px',
+                                    fontSize: '14px', lineHeight: '1.6', resize: 'none'
                                 }}
                             />
                             <button
                                 onClick={saveContactChanges}
                                 disabled={isSaving}
-                                className="btn btn-primary"
-                                style={{ marginTop: '12px', width: '100%', fontSize: '13px' }}
+                                className="btn-primary"
+                                style={{ marginTop: '16px', width: '100%', justifyContent: 'center', height: '48px' }}
                             >
-                                {isSaving ? 'Guardando...' : 'Guardar Nota'}
+                                {isSaving ? 'Guardando registro...' : 'Actualizar Notas'}
                             </button>
                         </div>
 
-                        <div style={{ marginTop: 'auto', display: 'flex', gap: '12px' }}>
-                            <button className="btn btn-primary" style={{ flex: 1 }}>Enviar Mensaje</button>
-                            <button className="btn" style={{ background: 'var(--glass)', border: '1px solid var(--glass-border)', flex: 1 }}>Ver Historial</button>
+                        <div style={{ marginTop: 'auto', display: 'flex', gap: '16px' }}>
+                            <button className="btn-primary" style={{ flex: 2, justifyContent: 'center', height: '52px' }}>Enviar Mensaje</button>
+                            <button style={{
+                                background: 'rgba(255,255,255,0.03)',
+                                border: '1px solid var(--border-subtle)',
+                                flex: 1,
+                                color: 'white',
+                                borderRadius: '12px',
+                                fontWeight: '700',
+                                fontSize: '14px',
+                                cursor: 'pointer'
+                            }} className="hover:bg-white/5 transition-colors">Historial</button>
                         </div>
                     </div>
                 </div>
