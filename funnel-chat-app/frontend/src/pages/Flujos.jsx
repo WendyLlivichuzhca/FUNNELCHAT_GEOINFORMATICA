@@ -12,6 +12,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Plus, Save, Play, MessageSquare, Split, Send, X } from 'lucide-react';
+import { API_URL } from '../config/api';
 
 // --- Componentes de Nodos Personalizados ---
 
@@ -129,7 +130,7 @@ const Flujos = () => {
 
     // Cargar flujo desde el backend
     useEffect(() => {
-        fetch('http://localhost:8000/api/flows')
+        fetch(`${API_URL}/api/flows`)
             .then(res => res.json())
             .then(data => {
                 setNodes(data.nodes || []);
@@ -186,7 +187,7 @@ const Flujos = () => {
         setTestInput('');
 
         try {
-            const response = await fetch('http://localhost:8000/api/flows/test', {
+            const response = await fetch(`${API_URL}/api/flows/test`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -206,7 +207,7 @@ const Flujos = () => {
 
     const saveFlow = async () => {
         try {
-            const response = await fetch('http://localhost:8000/api/flows', {
+            const response = await fetch('${API_URL}/api/flows', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ nodes, edges })

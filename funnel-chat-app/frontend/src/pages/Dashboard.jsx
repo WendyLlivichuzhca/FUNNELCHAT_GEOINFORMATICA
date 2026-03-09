@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Users, MessageSquare, TrendingUp, Zap, Plus, Smartphone, CheckCircle, XCircle, MoreVertical, ExternalLink, Smile } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { io } from 'socket.io-client';
+import { API_URL, SOCKET_URL } from '../config/api';
 
-const socket = io('http://127.0.0.1:8000', {
+const socket = io(SOCKET_URL, {
     autoConnect: true
 });
 
@@ -714,7 +715,7 @@ const Dashboard = () => {
         };
 
         // Fetch stats
-        fetch('http://127.0.0.1:8000/api/stats', { headers })
+        fetch(`${API_URL}/api/stats`, { headers })
             .then(res => res.json())
             .then(data => {
                 setStats({
