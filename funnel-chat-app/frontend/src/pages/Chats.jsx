@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Image, Smile, Paperclip, Search, Check, CheckCheck, MoreVertical, Play, Download, FileText, ArrowLeft, MessageSquare, ExternalLink, Clock } from 'lucide-react';
 import io from 'socket.io-client';
+import { API_URL, SOCKET_URL } from '../config/api';
 
-const socket = io('http://127.0.0.1:8000', {
+const socket = io(SOCKET_URL, {
     transports: ['websocket']
 });
 
@@ -184,7 +185,7 @@ const AudioPlayer = ({ url }) => {
 
 const MediaMessage = ({ msg, onOpenMedia }) => {
     if (!msg.mediaPath && msg.type !== 'location') return null;
-    const url = msg.mediaPath ? `http://127.0.0.1:8000/media/${msg.mediaPath}` : '';
+    const url = msg.mediaPath ? `${API_URL}/media/${msg.mediaPath}` : '';
 
     if (msg.mediaType === 'image') {
         return (
@@ -354,7 +355,7 @@ const Chats = () => {
     // Cargar contactos al inicio
     useEffect(() => {
         const token = localStorage.getItem('token');
-        fetch('http://127.0.0.1:8000/api/contacts', {
+        fetch(`${API_URL}/api/chats`, {
             headers: { 'Authorization': `Bearer ${token}` }
         })
             .then(res => res.json())
@@ -379,7 +380,8 @@ const Chats = () => {
         ));
 
         // Obtener historial
-        fetch(`http://127.0.0.1:8000/api/chat/${contact.id}`, {
+        const chatId = contact.whatsapp_id || contact.id;
+        fetch(`${API_URL}/api/chat/${chatId}`, {
             headers: { 'Authorization': `Bearer ${token}` }
         })
             .then(res => res.json())
@@ -389,7 +391,7 @@ const Chats = () => {
                 if (data.length > 0) {
                     const lastMsg = data[data.length - 1];
                     if (lastMsg.sender === 'user') { // Solo si el último es del cliente
-                        fetch(`http://127.0.0.1:8000/api/chat/read?whatsapp_id=${contact.whatsapp_id}&message_id=${lastMsg.id}`, {
+                        fetch(`${API_URL}/api/chat/read?whatsapp_id=${contact.whatsapp_id}&message_id=${lastMsg.id}`, {
                             method: 'POST',
                             headers: { 'Authorization': `Bearer ${token}` }
                         }).catch(e => console.error("Error al sincronizar lectura:", e));
@@ -409,7 +411,7 @@ const Chats = () => {
         const timer = setTimeout(() => {
             setIsSearchLoading(true);
             const token = localStorage.getItem('token');
-            fetch(`http://127.0.0.1:8000/api/search?q=${encodeURIComponent(searchTerm)}`, {
+            fetch(`${API_URL}/api/search?q=${encodeURIComponent(searchTerm)}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             })
                 .then(res => res.json())
@@ -464,7 +466,7 @@ const Chats = () => {
 
                 // Marcar como leído automáticamente si el chat está abierto
                 const token = localStorage.getItem('token');
-                fetch(`http://127.0.0.1:8000/api/chat/read?whatsapp_id=${jid}&message_id=${data.message.id}`, {
+                fetch(`${API_URL}/api/chat/read?whatsapp_id=${jid}&message_id=${data.message.id}`, {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${token}` }
                 }).catch(() => { });
@@ -529,11 +531,25 @@ const Chats = () => {
             ));
         });
 
+        socket.on('contacts_updated', () => {
+            const token = localStorage.getItem('token');
+            fetch(`${API_URL}/api/chats`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            })
+                .then(res => res.json())
+                .then(data => {
+                    const sorted = Array.isArray(data) ? [...data].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) : [];
+                    setContacts(sorted);
+                })
+                .catch(err => console.error("Error refetching chats:", err));
+        });
+
         return () => {
             socket.off('new_whatsapp_message');
             socket.off('message_status_update');
             socket.off('sync_progress');
             socket.off('whatsapp_contacts');
+            socket.off('contacts_updated');
         };
     }, [activeContact]);
 
@@ -596,7 +612,7 @@ const Chats = () => {
     const handleSaveNotes = () => {
         if (!activeContact) return;
         const token = localStorage.getItem('token');
-        fetch(`http://127.0.0.1:8000/api/contacts/${activeContact.id}/notes`, {
+        fetch(`${API_URL}/api/contacts/${activeContact.id}/notes`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${token}`,

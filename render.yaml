@@ -1,0 +1,53 @@
+services:
+  # Backend FastAPI service
+  - type: web
+    name: funnelchat-backend
+    env: python
+    region: oregon
+    plan: standard
+    buildCommand: |
+      cd funnel-chat-app/backend && pip install -r requirements.txt
+    startCommand: |
+      cd funnel-chat-app/backend && uvicorn main:sio_app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: PORT
+        value: 8000
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        value: sqlite:///./devices.db
+      - key: DEBUG
+        value: false
+      - key: USE_MOCK_BRIDGE
+        value: false
+      - key: FRONTEND_URL
+        fromService:
+          type: web
+          name: funnelchat-frontend
+          property: renderURL
+
+  # Frontend React service
+  - type: static-site
+    name: funnelchat-frontend
+    env: node
+    region: oregon
+    plan: standard
+    buildCommand: npm --prefix funnel-chat-app/frontend run build
+    staticPublishPath: funnel-chat-app/frontend/dist
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: funnelchat-backend
+          property: renderURL
+      - key: VITE_SOCKET_URL
+        fromService:
+          type: web
+          name: funnelchat-backend
+          property: renderURL
+
+databases:
+  - name: funnelchat-db
+    plan: standard
