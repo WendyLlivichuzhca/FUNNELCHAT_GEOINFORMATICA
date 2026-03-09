@@ -1,6 +1,12 @@
+# Parche para error de bcrypt/passlib
+import bcrypt
+if not hasattr(bcrypt, "__about__"):
+    bcrypt.__about__ = type('about', (object,), {'__version__': bcrypt.__version__})
+
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.staticfiles import StaticFiles
 import socketio
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
@@ -10,19 +16,26 @@ from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from typing import Optional, List
 from pydantic import BaseModel
+import time
+import os
+from dotenv import load_dotenv
+
+# Cargar variables de entorno de forma robusta
+env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+load_dotenv(dotenv_path=env_path)
 
 class RegisterRequest(BaseModel):
     username: str
     password: str
 
 # Configuración de Base de Datos (SQLAlchemy)
-SQLALCHEMY_DATABASE_URL = "sqlite:///./devices.db"
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./devices.db")
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 # Seguridad y JWT
-SECRET_KEY = "super-secret-key-for-funnel-chat" # Cambiar en producción
+SECRET_KEY = os.getenv("SECRET_KEY", "fallback-secret-key-change-me")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 1 semana
 
@@ -102,7 +115,14 @@ async def lifespan(app: FastAPI):
     global bridge_process
     print("Iniciando el puente de WhatsApp (Node.js)...")
     bridge_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whatsapp-bridge")
-    bridge_script = os.path.join(bridge_dir, "bridge.js")
+    
+    # Decidir qué script usar: real o simulación
+    use_mock = os.getenv("USE_MOCK_BRIDGE", "false").lower() == "true"
+    script_name = "mock_bridge.js" if use_mock else "bridge.js"
+    bridge_script = os.path.join(bridge_dir, script_name)
+    
+    print(f"--- [MODO: {'SIMULACIÓN' if use_mock else 'REAL'}] ---")
+    print(f"Lanzando: {script_name}")
     
     try:
         # Se inicia en segundo plano sin bloquear el hilo principal de Python
@@ -110,7 +130,7 @@ async def lifespan(app: FastAPI):
             ["node", bridge_script],
             cwd=bridge_dir
         )
-        print("Puente de WhatsApp iniciado automáticamente.")
+        print(f"Puente de WhatsApp ({script_name}) iniciado automáticamente.")
     except Exception as e:
         print(f"Error al iniciar el puente de WhatsApp: {e}")
         
@@ -127,6 +147,12 @@ async def lifespan(app: FastAPI):
 
 # Inicialización de FastAPI
 app = FastAPI(title="Funnel Chat API", lifespan=lifespan)
+
+# Paso 3: Servir archivos multimedia
+media_storage_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whatsapp-bridge", "media")
+if not os.path.exists(media_storage_path):
+    os.makedirs(media_storage_path)
+app.mount("/media", StaticFiles(directory=media_storage_path), name="media")
 
 # Manejador global de excepciones para debugging
 from fastapi.responses import JSONResponse
@@ -145,7 +171,7 @@ async def global_exception_handler(request, exc):
 # Configuración de CORS para permitir peticiones desde el frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # En producción, especificar el dominio del frontend
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -179,13 +205,16 @@ active_qr_user_id = None  # El último user_id que inició una sesión QR
 
 @app.post("/token")
 async def login_for_access_token(db: Session = Depends(get_db), form_data: OAuth2PasswordRequestForm = Depends()):
+    print(f"\n[AUTH] Intentando login para usuario: {form_data.username}")
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
+        print(f"[AUTH] ❌ Credenciales inválidas para: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    print(f"[AUTH] ✅ Login exitoso: {form_data.username}")
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
@@ -194,6 +223,7 @@ async def login_for_access_token(db: Session = Depends(get_db), form_data: OAuth
 
 @app.post("/register")
 async def register(data: RegisterRequest, db: Session = Depends(get_db)):
+    print(f"\n[AUTH] Intentando registro para usuario: {data.username}")
     existing_user = db.query(User).filter(User.username == data.username).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already registered")
@@ -209,6 +239,7 @@ async def register(data: RegisterRequest, db: Session = Depends(get_db)):
     d2 = Device(user_id=new_user.id, device_name="WhatsApp Empresa", status="desconectado", phone="Sin registro")
     db.add_all([d1, d2])
     db.commit()
+    print(f"[AUTH] ✅ Usuario registrado exitosamente: {data.username}")
     
     return {"status": "success", "message": "User created", "user_id": new_user.id}
 
@@ -452,46 +483,160 @@ async def handle_whatsapp_qr(sid, data):
     await sio.emit('whatsapp_qr_ready', {"qr": qr_code})
     print(f">>> [SOCKET] EVENTO 'whatsapp_qr_ready' EMITIDO AL FRONTEND")
 
+@sio.on('whatsapp_qr_ready')
+async def handle_whatsapp_qr_ready(sid, data):
+    # Relayar el QR del bridge al frontend
+    print(f">>> [BACKEND] RELAY: whatsapp_qr_ready")
+    await sio.emit('whatsapp_qr_ready', data)
+
 @sio.on('whatsapp_status')
 async def handle_whatsapp_status(sid, data):
+    # data: { status: 'conectado' | 'desconectado' | 'session_expired' | 'conflict' }
     status_val = data.get("status")
-    print(f">>> [SOCKET] ESTADO RECIBIDO: {status_val}")
+    print(f">>> [BACKEND] RELAY: whatsapp_status -> {status_val}")
     
-    db = SessionLocal()
-    try:
-        # Prioridad 1: El usuario que está intentando conectar ahora
-        # Prioridad 2: Buscar si hay algún dispositivo ya conectado que necesite refrescar su estado
-        device = None
-        if active_qr_user_id:
-            device = db.query(Device).filter(
-                Device.user_id == active_qr_user_id,
-                Device.device_name == "WhatsApp Personal"
-            ).first()
-        
-        if not device:
-            # Fallback seguro: No pillar ID 1 a ciegas, buscar quién está marcado como conectado
-            device = db.query(Device).filter(
-                Device.device_name == "WhatsApp Personal",
-                Device.status == "conectado"
-            ).first()
-        
-        # Si sigue sin haber nada, entonces cogemos el primero (Wendy ID 3 en su caso)
-        if not device:
-            device = db.query(Device).filter(Device.device_name == "WhatsApp Personal").first()
-        
-        if device:
-            device.status = "conectado" if status_val == "conectado" else "desconectado"
-            db.commit()
-            print(f"--- [MAIN.PY] Dispositivo '{device.device_name}' del user_id={device.user_id} -> {device.status} ---")
-            await sio.emit('device_status', {"device_id": device.id, "status": device.status})
-    finally:
-        db.close()
+    # Propagar al frontend
+    await sio.emit('whatsapp_status', data)
+    
+    # Si el estado es de conexión/desconexión, actualizamos la BD
+    if status_val in ["conectado", "desconectado"]:
+        db = SessionLocal()
+        try:
+            # Asociar el cambio de estado al usuario activo de la sesión QR o al dueño del dispositivo
+            target_user_id = active_qr_user_id
+            device = None
+            if target_user_id:
+                device = db.query(Device).filter(Device.user_id == target_user_id, Device.device_name == "WhatsApp Personal").first()
+            
+            if not device:
+                device = db.query(Device).filter(Device.device_name == "WhatsApp Personal").first()
+            
+            if device:
+                device.status = status_val
+                db.commit()
+                # Notificar cambio de estado de dispositivo
+                await sio.emit('device_status', {"device_id": device.id, "status": status_val})
+        finally:
+            db.close()
+
+@sio.on('whatsapp_ready_for_sync')
+async def handle_whatsapp_ready_for_sync(sid, data):
+    print(">>> [BACKEND] RELAY: whatsapp_ready_for_sync")
+    await sio.emit('whatsapp_ready_for_sync', data)
 
 @sio.on('whatsapp_message')
 async def handle_whatsapp_message(sid, data):
-    # Simular entrada de mensaje para el motor de flujos
-    print(f"MENSAJE REAL RECIBIDO: {data}")
-    await message(sid, {"text": data.get("body"), "contact_id": 1})
+    jid = data.get("whatsapp_id") or data.get("contact_id")
+    text = data.get("text") or ""
+    media = data.get("media")
+    
+    print(f">>> [BACKEND] MENSAJE DE {jid}: {text[:20]}... (Media: {'SI' if media else 'NO'})")
+    
+    await process_whatsapp_message(data)
+    
+@sio.on('whatsapp_chat_history')
+async def handle_whatsapp_chat_history(sid, data):
+    jid = data.get("whatsapp_id") or data.get("contact_id")
+    history = data.get("history", [])
+    
+    print(f">>> [BACKEND] RECIBIDO HISTORIAL BAILEYS PARA {jid}: {len(history)} MENSAJES")
+    
+    # Normalizar formato de mensajes históricos de Baileys
+    normalized_history = []
+    for h in history:
+        normalized_history.append({
+            "id": h.get("id"),
+            "text": h.get("text"),
+            "sender": h.get("sender"),
+            "timestamp": h.get("timestamp"),
+            "status": h.get("status", 1),
+            "participant": h.get("participant"),
+            "mediaType": h.get("mediaType"),
+            "mediaPath": h.get("mediaPath"),
+            "fileName": h.get("fileName")
+        })
+    
+    chat_histories[jid] = normalized_history
+    
+    # Buscar el contact_id local
+    db_contacts = []
+    for u_id in contacts_mock_db:
+        db_contacts.extend(contacts_mock_db[u_id])
+    
+    contact = next((c for c in db_contacts if c.get("whatsapp_id") == jid), None)
+    c_id = contact.get("id") if contact else 1
+    
+    # Notificar al frontend
+    await sio.emit('history_ready', {"contact_id": c_id, "whatsapp_id": jid, "history": normalized_history})
+
+async def process_whatsapp_message(data):
+    # Formato Baileys: {id, contact_id, text, sender, timestamp, fromMe}
+    jid = data.get("whatsapp_id") or data.get("contact_id")
+    text = data.get("text")
+    from_me = data.get("fromMe", False)
+    sender = data.get("sender", "bot" if from_me else "user")
+    timestamp = data.get("timestamp") or int(time.time())
+    
+    print(f">>> [BACKEND] PROCESANDO MENSAJE DE {jid}: {text[:30]}...")
+    
+    # 1. Actualizar metadatos en contacts_mock_db
+    for u_id in contacts_mock_db:
+        for contact in contacts_mock_db[u_id]:
+            if contact.get("whatsapp_id") == jid:
+                contact["last_message"] = text
+                contact["timestamp"] = timestamp
+                if not from_me:
+                    contact["unread_count"] = contact.get("unread_count", 0) + 1
+                break
+
+    # 2. Guardar en historial
+    if jid not in chat_histories: chat_histories[jid] = []
+    
+    new_msg = {
+        "id": len(chat_histories[jid]), 
+        "text": text, 
+        "sender": sender,
+        "timestamp": timestamp,
+        "mediaType": data.get("mediaType"),
+        "mediaPath": data.get("mediaPath"),
+        "fileName": data.get("fileName"),
+        "status": data.get("status", 1),
+        "participant": data.get("participant"),
+        "pushName": data.get("pushName")
+    }
+    chat_histories[jid].append(new_msg)
+    
+    # 3. Notificar al frontend
+    await sio.emit('new_whatsapp_message', {
+        "contact_id": jid,
+        "whatsapp_id": jid,
+        "message": new_msg,
+        "unreadCount": next((c.get("unread_count", 0) for u in contacts_mock_db.values() for c in u if c.get("whatsapp_id") == jid), 0)
+    })
+
+@sio.on('whatsapp_receipt')
+async def handle_whatsapp_receipt(sid, data):
+    # data is a list of receipt objects from Baileys
+    # Cada uno tiene { key, type, update: { status, readTimestamp } }
+    print(f">>> [BACKEND] RECIBIDO RECIBO WHATSAPP: {len(data)} actualizaciones")
+    
+    # Propagar al frontend para actualizar los ticks
+    await sio.emit('message_status_update', data)
+    
+    # Opcionalmente actualizar historial interno
+    for item in data:
+        jid = item.get("key", {}).get("remoteJid")
+        msg_id = item.get("key", {}).get("id")
+        new_status = item.get("update", {}).get("status")
+        
+        if jid in chat_histories:
+            for msg in chat_histories[jid]:
+                if msg.get("id") == msg_id:
+                    msg["status"] = new_status
+                    break
+
+    # IMPORTANTE: No llamar a message(sid, ...) aquí porque entraría en bucle con el bot 
+    # si no se maneja con cuidado. Solo lo guardamos y mostramos.
 
 @sio.on('whatsapp_contacts')
 async def handle_whatsapp_contacts(sid, data):
@@ -519,31 +664,52 @@ async def handle_whatsapp_contacts(sid, data):
     if target_user_id not in contacts_mock_db:
         contacts_mock_db[target_user_id] = []
     
-    existing_nums = {c.get("phone") for c in contacts_mock_db[target_user_id]}
+    # Mapa de contactos existentes por whatsapp_id (JID) para actualización rápida
+    contacts_list = contacts_mock_db.get(target_user_id, [])
+    existing_contacts_map = {c.get("whatsapp_id"): c for c in contacts_list if c.get("whatsapp_id")}
+    
     synced_count = 0
     for wc in new_contacts:
-        num = wc.get("number") or (wc.get("id", "").split("@")[0])
-        name = wc.get("name", num)
-        if num and num not in existing_nums:
+        w_id = wc.get("id") # JID de Baileys
+        num = wc.get("number")
+        name = wc.get("name")
+        
+        if w_id and w_id in existing_contacts_map:
+            existing_contact = existing_contacts_map[w_id]
+            existing_contact["name"] = name
+            existing_contact["phone"] = num
+            # Nuevos campos de WhatsApp Web Clone
+            existing_contact["last_message"] = wc.get("lastMessage", "")
+            existing_contact["timestamp"] = wc.get("timestamp", 0)
+            existing_contact["unread_count"] = wc.get("unreadCount", 0)
+            existing_contact["is_group"] = wc.get("isGroup", False)
+            existing_contact["participants"] = wc.get("participants", [])
+        else:
             new_contact = {
-                "id": len(contacts_mock_db[target_user_id]) + 1,
-                "whatsapp_id": wc.get("id"), # Guardamos el JID real
+                "id": len(contacts_list) + 1,
+                "whatsapp_id": w_id,
                 "name": name,
                 "phone": num,
-                "email": f"{num}@whatsapp.com",
+                "email": f"{num}@whatsapp.com" if num else "",
                 "status": "Nuevo",
                 "tag": "WhatsApp",
-                "notes": f"Importado desde WhatsApp"
+                "notes": f"Importado vía Baileys",
+                # Nuevos campos de WhatsApp Web Clone
+                "last_message": wc.get("lastMessage", ""),
+                "timestamp": wc.get("timestamp", 0),
+                "unread_count": wc.get("unreadCount", 0),
+                "is_group": wc.get("isGroup", False),
+                "participants": wc.get("participants", [])
             }
-            contacts_mock_db[target_user_id].append(new_contact)
-            existing_nums.add(num)
+            contacts_list.append(new_contact)
             synced_count += 1
     
-    print(f">>> [BACKEND] PROCESANDO {synced_count} CONTACTOS NUEVOS...")
+    print(f">>> [BACKEND] PROCESANDO {synced_count} CONTACTOS (LOTE BAILEYS)...")
     
-    # Emitir broadcast para que cualquier pestaña del usuario se actualice
-    print(f">>> [BACKEND] EMITIENDO 'contacts_updated' AL FRONTEND (Total: {len(contacts_mock_db.get(target_user_id, []))})")
-    await sio.emit('contacts_updated', {"count": synced_count, "user_id": target_user_id})
+    # Solo emitir actualización final al Dashboard cuando termine el lote completo
+    is_last_batch = wc.get("batch_index", 0) + 1 >= wc.get("total_chats", 1)
+    if is_last_batch:
+        await sio.emit('contacts_updated', {"count": len(contacts_list), "user_id": target_user_id})
 
 @app.post("/api/devices/logout")
 async def logout_device(current_user: User = Depends(get_current_user)):
@@ -561,6 +727,59 @@ async def logout_device(current_user: User = Depends(get_current_user)):
         db.close()
         
     return {"status": "success", "message": "Orden de logout enviada"}
+
+@app.get("/api/search")
+async def global_search(q: str, current_user: User = Depends(get_current_user)):
+    """Busca palabras clave en todos los historiales de chat."""
+    results = []
+    query = q.lower()
+    
+    # Obtener el nombre del contacto para contexto
+    contacts_list = contacts_mock_db.get(current_user.id, [])
+    contact_names = {c.get("whatsapp_id"): c.get("name") for c in contacts_list}
+
+    for jid, history in chat_histories.items():
+        for msg in history:
+            text = msg.get("text", "")
+            if query in text.lower():
+                results.append({
+                    "contact_id": jid,
+                    "contact_name": contact_names.get(jid, jid),
+                    "message": msg
+                })
+    
+    # Ordenar por timestamp descendente
+    results.sort(key=lambda x: x["message"]["timestamp"], reverse=True)
+    return results[:50] # Limitar a 50 resultados
+
+@app.post("/api/chat/read")
+async def mark_chat_as_read(whatsapp_id: str, message_id: str, current_user: User = Depends(get_current_user)):
+    """Limpia el contador de no leídos local y notifica al bridge."""
+    # 1. Limpiar en BD local (mock)
+    if current_user.id in contacts_mock_db:
+        for contact in contacts_mock_db[current_user.id]:
+            if contact.get("whatsapp_id") == whatsapp_id:
+                contact["unread_count"] = 0
+                break
+    
+    # 2. Notificar al bridge para sincronizar con WhatsApp real (blue ticks)
+    await sio.emit('mark_as_read', {"whatsapp_id": whatsapp_id, "message_id": message_id})
+    
+    return {"status": "success"}
+
+class NoteRequest(BaseModel):
+    notes: str
+
+@app.post("/api/contacts/{contact_id}/notes")
+async def update_contact_notes(contact_id: int, request: NoteRequest, current_user: User = Depends(get_current_user)):
+    """Actualiza las notas de un contacto en el CRM."""
+    if current_user.id in contacts_mock_db:
+        for contact in contacts_mock_db[current_user.id]:
+            if contact.get("id") == contact_id:
+                contact["notes"] = request.notes
+                return {"status": "success", "notes": request.notes}
+    
+    raise HTTPException(status_code=404, detail="Contacto no encontrado")
 
 @app.post("/api/sync_contacts")
 async def sync_contacts():

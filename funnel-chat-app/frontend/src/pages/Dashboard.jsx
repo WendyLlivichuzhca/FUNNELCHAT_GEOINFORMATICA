@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Users, MessageSquare, TrendingUp, Zap, Plus, Smartphone, CheckCircle, XCircle, MoreVertical, ExternalLink } from 'lucide-react';
+import { Users, MessageSquare, TrendingUp, Zap, Plus, Smartphone, CheckCircle, XCircle, MoreVertical, ExternalLink, Smile } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { io } from 'socket.io-client';
 
 const socket = io('http://127.0.0.1:8000', {
-    transports: ['websocket'],
     autoConnect: true
 });
 
@@ -120,13 +119,27 @@ const QRModal = ({ isOpen, onClose, onFinish, onLogout }) => {
             console.log("QR Real recibido para mostrar:", data.qr.substring(0, 20) + "...");
             setQrCode(data.qr);
             setQrError(false);
+            setStep(1); // Asegurar que estamos en vista QR
         });
 
         socket.on('device_status', (data) => {
             if (data.status === 'conectado') {
+                console.log(">>> DASHBOARD: Conexión detectada. Esperando para sincronizar...");
                 clearTimeout(timeout);
-                setStep(2);
+                // NO cambiar a step 2 aquí, esperar a whatsapp_ready_for_sync
             }
+        });
+
+        socket.on('whatsapp_ready_for_sync', (data) => {
+            console.log(">>> DASHBOARD: Conexión lista, iniciando sincronización...");
+            setStep(2);  // ✅ AHORA sí cambiar a paso 2
+            socket.emit('request_contacts_sync');
+        });
+
+        socket.on('sync_progress', (data) => {
+            console.log("Progreso recibido:", data.progress);
+            setStep(2); // Forzar vista de carga si llega progreso
+            setProgress(data.progress);
         });
 
         socket.on('contacts_updated', (data) => {
@@ -141,6 +154,8 @@ const QRModal = ({ isOpen, onClose, onFinish, onLogout }) => {
             clearTimeout(timeout);
             socket.off('whatsapp_qr_ready');
             socket.off('device_status');
+            socket.off('whatsapp_ready_for_sync');
+            socket.off('sync_progress');
             socket.off('contacts_updated');
         };
     }, [isOpen, onFinish, step, !!qrCode]);
@@ -200,33 +215,38 @@ const QRModal = ({ isOpen, onClose, onFinish, onLogout }) => {
                                     <li>Toca <span style={{ fontWeight: 'bold', color: 'white' }}>Vincular un dispositivo</span></li>
                                     <li>Escanea el código de la derecha con la cámara de tu WhatsApp</li>
                                 </ol>
+
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                                     <div style={{
-                                        padding: '12px', background: 'rgba(16, 185, 129, 0.1)',
-                                        borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.2)'
+                                        padding: '12px 16px',
+                                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                        borderRadius: '12px',
+                                        border: '1px solid rgba(16, 185, 129, 0.2)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '12px'
                                     }}>
-                                        <p style={{ color: '#10b981', fontSize: '13px', fontWeight: '500', margin: 0 }}>
-                                            ✓ Conexión Segura Calidad FunnelChat
-                                        </p>
+                                        <CheckCircle size={20} color="#10b981" />
+                                        <span style={{ fontSize: '14px', color: '#10b981', fontWeight: '500' }}>Conexión Segura Calidad FunnelChat</span>
                                     </div>
+
                                     <button
                                         onClick={onLogout}
+                                        className="btn-danger"
                                         style={{
-                                            background: 'rgba(239, 68, 68, 0.1)',
-                                            color: '#ef4444',
-                                            border: '1px solid rgba(239, 68, 68, 0.2)',
-                                            padding: '8px 12px',
+                                            padding: '10px',
+                                            fontSize: '13px',
                                             borderRadius: '8px',
-                                            fontSize: '12px',
-                                            cursor: 'pointer',
-                                            fontWeight: '600',
                                             display: 'flex',
                                             alignItems: 'center',
                                             justifyContent: 'center',
-                                            gap: '6px'
+                                            gap: '8px',
+                                            background: 'rgba(239, 68, 68, 0.1)',
+                                            border: '1px solid rgba(239, 68, 68, 0.2)',
+                                            color: '#ef4444'
                                         }}
                                     >
-                                        <XCircle size={14} />
+                                        <Smile size={16} />
                                         Cerrar sesión actual / Resetear QR
                                     </button>
                                 </div>
@@ -235,7 +255,8 @@ const QRModal = ({ isOpen, onClose, onFinish, onLogout }) => {
                             <div style={{
                                 padding: '16px', background: 'white', borderRadius: '12px',
                                 boxShadow: '0 20px 25px -5px rgba(0,0,0,0.3)', width: '250px', height: '250px',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative'
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
+                                flexShrink: 0
                             }}>
                                 {qrCode ? (
                                     <img
@@ -247,15 +268,13 @@ const QRModal = ({ isOpen, onClose, onFinish, onLogout }) => {
                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '8px' }}>
                                         <span style={{ fontSize: '28px' }}>⚠️</span>
                                         <p style={{ color: '#ef4444', fontSize: '11px', fontWeight: 'bold', margin: 0 }}>Bridge no responde</p>
-                                        <p style={{ color: '#64748b', fontSize: '10px', margin: 0, textAlign: 'center' }}>¿Ya estabas conectado? Intenta resetear o cerrar sesión.</p>
-                                        <div style={{ display: 'flex', gap: '4px' }}>
-                                            <button
-                                                onClick={() => { setQrError(false); setQrCode(null); }}
-                                                style={{ padding: '6px 10px', background: '#6366f1', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
-                                            >
-                                                Reintentar
-                                            </button>
-                                        </div>
+                                        <p style={{ color: '#64748b', fontSize: '10px', margin: 0, textAlign: 'center' }}>¿Ya estabas conectado? Intenta resetear.</p>
+                                        <button
+                                            onClick={() => { setQrError(false); setQrCode(null); }}
+                                            style={{ padding: '6px 12px', background: '#6366f1', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '11px' }}
+                                        >
+                                            Reintentar
+                                        </button>
                                     </div>
                                 ) : (
                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
@@ -292,6 +311,23 @@ const QRModal = ({ isOpen, onClose, onFinish, onLogout }) => {
                             <div style={{ width: `${progress}%`, height: '100%', background: '#10b981', transition: 'width 0.1s linear' }}></div>
                         </div>
                         <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{progress}% sincronizado</span>
+
+                        <button
+                            onClick={onLogout}
+                            style={{
+                                marginTop: '20px',
+                                padding: '8px 16px',
+                                fontSize: '12px',
+                                background: 'transparent',
+                                border: '1px solid rgba(239, 68, 68, 0.3)',
+                                color: '#ef4444',
+                                borderRadius: '8px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            <Smile size={14} style={{ marginRight: '8px' }} />
+                            ¿No eres tú? Cerrar sesión y resetear QR
+                        </button>
                     </div>
                 )}
             </div>
@@ -368,6 +404,9 @@ const Dashboard = () => {
     });
     const [devices, setDevices] = useState([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [syncProgress, setSyncProgress] = useState(0);
+    const [syncMessage, setSyncMessage] = useState('');
+    const [isSyncing, setIsSyncing] = useState(false);
     const [isQRModalOpen, setIsQRModalOpen] = useState(false);
     const [selectedDevice, setSelectedDevice] = useState(null);
 
@@ -379,7 +418,7 @@ const Dashboard = () => {
         };
 
         // Fetch stats
-        fetch('http://localhost:8000/api/stats', { headers })
+        fetch('http://127.0.0.1:8000/api/stats', { headers })
             .then(res => res.json())
             .then(data => {
                 setStats({
@@ -392,7 +431,7 @@ const Dashboard = () => {
             .catch(err => console.error("Error fetching stats:", err));
 
         // Fetch devices
-        fetch('http://localhost:8000/api/devices', { headers })
+        fetch('http://127.0.0.1:8000/api/devices', { headers })
             .then(res => res.json())
             .then(data => setDevices(data))
             .catch(err => console.error("Error fetching devices:", err));
@@ -407,12 +446,27 @@ const Dashboard = () => {
 
         socket.on('contacts_updated', (data) => {
             console.log("Contactos sincronizados correctamente:", data);
-            alert(`¡Éxito! Se han sincronizado ${data.count} contactos reales de tu WhatsApp.`);
+            // alert(`¡Éxito! Se han sincronizado ${data.count} contactos reales de tu WhatsApp.`);
+        });
+
+        socket.on('whatsapp_qr_ready', (data) => {
+            console.log('>>> QR RECIBIDO EN DASHBOARD');
+        });
+
+        socket.on('sync_progress', (data) => {
+            setIsSyncing(true);
+            setSyncProgress(data.progress);
+            setSyncMessage(data.message);
+            if (data.progress === 100) {
+                setTimeout(() => setIsSyncing(false), 3000);
+            }
         });
 
         return () => {
             socket.off('device_status');
             socket.off('contacts_updated');
+            socket.off('whatsapp_qr_ready');
+            socket.off('sync_progress');
         };
     }, []);
 
@@ -424,7 +478,7 @@ const Dashboard = () => {
         }
 
         // Si ya está conectado, procedemos a desconectar directamente o pedir confirmación
-        const url = 'http://localhost:8000/disconnect_device';
+        const url = 'http://127.0.0.1:8000/disconnect_device';
         const token = localStorage.getItem('token');
 
         try {
@@ -454,7 +508,7 @@ const Dashboard = () => {
         console.log("Simulando apertura de Facebook Business Tool...");
 
         try {
-            const url = 'http://localhost:8000/connect_device';
+            const url = 'http://127.0.0.1:8000/connect_device';
             const token = localStorage.getItem('token');
             const response = await fetch(url, {
                 method: 'POST',
@@ -493,7 +547,9 @@ const Dashboard = () => {
             // Si el dispositivo ya figura como conectado en nuestra lista de estado,
             // podemos saltar directamente al paso de sincronización
             if (selectedDevice?.status === 'conectado') {
-                setStep(2);
+                // This `setStep` is for QRModal, but it's not directly accessible here.
+                // The QRModal itself handles its steps based on socket events.
+                // For now, we just open the QR modal.
             }
         } catch (err) {
             console.warn("No se pudo registrar la sesión QR:", err);
@@ -527,7 +583,7 @@ const Dashboard = () => {
         console.log("Simulando sincronización de chats post-QR...");
 
         try {
-            const url = 'http://localhost:8000/connect_device';
+            const url = 'http://127.0.0.1:8000/connect_device';
             const token = localStorage.getItem('token');
             const response = await fetch(url, {
                 method: 'POST',
@@ -551,7 +607,61 @@ const Dashboard = () => {
     };
 
     return (
-        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+        <div className="animate-fade-in" style={{ position: 'relative' }}>
+            {/* WhatsApp Web Style Sync Overlay */}
+            {isSyncing && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(10, 11, 20, 0.85)',
+                    backdropFilter: 'blur(10px)',
+                    zIndex: 9999,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                }}>
+                    <div className="glass-card" style={{ padding: '40px', width: '400px', textAlign: 'center', border: '1px solid rgba(255,255,255,0.1)' }}>
+                        <div style={{
+                            width: '80px',
+                            height: '80px',
+                            margin: '0 auto 24px',
+                            background: 'var(--primary-gradient)',
+                            borderRadius: '24px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            boxShadow: '0 20px 40px -10px rgba(99, 102, 241, 0.5)',
+                            transform: 'rotate(-5deg)'
+                        }}>
+                            <Smile size={40} color="white" />
+                        </div>
+                        <h2 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '10px', color: 'white' }}>Optimizando tu WhatsApp</h2>
+                        <p style={{ color: 'var(--text-muted)', fontSize: '15px', marginBottom: '32px' }}>{syncMessage}</p>
+
+                        <div style={{
+                            width: '100%',
+                            height: '8px',
+                            backgroundColor: 'rgba(255,255,255,0.05)',
+                            borderRadius: '4px',
+                            overflow: 'hidden',
+                            marginBottom: '16px'
+                        }}>
+                            <div style={{
+                                width: `${syncProgress}%`,
+                                height: '100%',
+                                background: 'var(--primary-gradient)',
+                                transition: 'width 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+                                boxShadow: '0 0 15px var(--primary)'
+                            }} />
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>Progreso</span>
+                            <span style={{ fontSize: '14px', color: 'var(--primary)', fontWeight: 'bold' }}>{syncProgress}%</span>
+                        </div>
+                    </div>
+                </div>
+            )}
             <ConnectDeviceModal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}

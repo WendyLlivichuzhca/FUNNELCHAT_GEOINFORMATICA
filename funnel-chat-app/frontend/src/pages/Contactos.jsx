@@ -39,9 +39,17 @@ const Contactos = () => {
             setSyncCount(data.count || 0);
             setShowSyncToast(true);
             fetchContacts();
-
-            // Ocultar notificación después de 5 segundos
             setTimeout(() => setShowSyncToast(false), 5000);
+        });
+
+        socket.on('whatsapp_contacts', (data) => {
+            if (data.is_batch) {
+                setContacts(prev => {
+                    const existingIds = new Set(prev.map(c => c.id || c.whatsapp_id));
+                    const newOnes = data.contacts.filter(c => !existingIds.has(c.id) && !existingIds.has(c.whatsapp_id));
+                    return [...prev, ...newOnes];
+                });
+            }
         });
 
         return () => {
