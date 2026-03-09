@@ -58,7 +58,8 @@ const Contactos = () => {
     }, [fetchContacts]);
 
     const filteredContacts = contacts.filter(contact => {
-        const searchStr = (contact.name + ' ' + (contact.phone || contact.email || '')).toLowerCase();
+        const displayName = (contact.pushName || contact.name || contact.phone || '').toLowerCase();
+        const searchStr = (displayName + ' ' + (contact.email || '')).toLowerCase();
         const matchesSearch = searchStr.includes(searchTerm.toLowerCase());
         const matchesFilter = activeFilter === 'Todos' || contact.status === activeFilter || contact.tag === activeFilter;
         return matchesSearch && matchesFilter;
@@ -222,9 +223,9 @@ const Contactos = () => {
                                                 color: 'white',
                                                 boxShadow: '0 8px 15px -3px rgba(99, 102, 241, 0.3)'
                                             }}>
-                                                {contact.name.charAt(0)}
+                                                {(contact.pushName || contact.name || contact.phone || '?').charAt(0).toUpperCase()}
                                             </div>
-                                            <span className="heading-base" style={{ fontSize: '15px' }}>{contact.name}</span>
+                                            <span className="heading-base" style={{ fontSize: '15px' }}>{contact.pushName || contact.name || contact.phone || 'Desconocido'}</span>
                                         </div>
                                     </td>
                                     <td style={{ padding: '16px', borderBottom: '1px solid var(--border-subtle)' }}>
@@ -317,11 +318,11 @@ const Contactos = () => {
                                     boxShadow: '0 15px 30px -5px rgba(99, 102, 241, 0.4)',
                                     transform: 'rotate(-3deg)'
                                 }}>
-                                    {selectedContact.name.charAt(0)}
+                                    {(selectedContact.pushName || selectedContact.name || selectedContact.phone || '?').charAt(0).toUpperCase()}
                                 </div>
                                 <div>
-                                    <h3 className="heading-xl" style={{ fontSize: '26px', marginBottom: '4px' }}>{selectedContact.name}</h3>
-                                    <p className="text-main" style={{ fontWeight: '600', color: 'var(--primary)' }}>{selectedContact.email || 'Lead de WhatsApp'}</p>
+                                    <h3 className="heading-xl" style={{ fontSize: '26px', marginBottom: '4px' }}>{selectedContact.pushName || selectedContact.name || selectedContact.phone || 'Desconocido'}</h3>
+                                    <p className="text-main" style={{ fontWeight: '600', color: 'var(--primary)' }}>{selectedContact.email || (selectedContact.phone ? `+${selectedContact.phone}` : 'Lead de WhatsApp')}</p>
                                 </div>
                             </div>
                             <button onClick={() => setSelectedContact(null)} style={{

@@ -19,14 +19,59 @@ const getAvatarColor = (id) => {
     return AVATAR_COLORS[sum % AVATAR_COLORS.length];
 };
 
-const formatTime = (timestamp) => {
-    if (!timestamp) return "";
-    const date = new Date(timestamp * 1000);
+const formatTime = (ts) => {
+    if (!ts) return "";
+    let date;
+    if (typeof ts === 'number') {
+        // Detectar si es segundos (10 dígitos) o milisegundos (13 dígitos)
+        date = new Date(ts < 10000000000 ? ts * 1000 : ts);
+    } else {
+        date = new Date(ts);
+    }
+
+    if (isNaN(date.getTime())) return "";
+
     const now = new Date();
-    if (date.toDateString() === now.toDateString()) {
+    const isToday = date.toDateString() === now.toDateString();
+
+    // Ayer
+    const yesterday = new Date();
+    yesterday.setDate(now.getDate() - 1);
+    const isYesterday = date.toDateString() === yesterday.toDateString();
+
+    const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
+
+    if (isToday) {
         return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
-    return date.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
+
+    if (isYesterday) {
+        return `ayer ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    }
+
+    if (diffDays < 7) {
+        const days = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+        return `${days[date.getDay()]} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    }
+
+    return date.toLocaleDateString([], { day: '2-digit', month: 'short' });
+};
+
+const getMessagePreview = (msg) => {
+    if (!msg) return "Sin mensajes";
+    if (msg.text) return msg.text;
+    const type = msg.mediaType || msg.type;
+    switch (type) {
+        case 'sticker': return "🎭 Sticker";
+        case 'image': return "📷 Imagen";
+        case 'video': return "🎥 Video";
+        case 'audio': return "🎵 Audio";
+        case 'document': return `📄 ${msg.fileName || 'Archivo'}`;
+        case 'location': return "📍 Ubicación compartida";
+        case 'contact': return "👤 Contacto compartido";
+        case 'reaction': return "✨ Reacción";
+        default: return "💬 Mensaje";
+    }
 };
 
 // Logs de depuración para la conexión del socket
@@ -91,43 +136,51 @@ const RecentActivityCard = ({ chats }) => {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {chats.length > 0 ? chats.map((act) => (
-                    <div
-                        key={act.whatsapp_id || act.id}
-                        style={{ display: 'flex', alignItems: 'center', gap: '14px', cursor: 'pointer' }}
-                        className="group"
-                        onClick={() => window.location.href = `/chats?id=${act.id}`}
-                    >
-                        <div style={{
-                            width: '40px', height: '40px', borderRadius: '12px',
-                            backgroundColor: getAvatarColor(act.whatsapp_id || act.id),
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            color: '#fff', fontSize: '14px', fontWeight: '800', fontFamily: 'var(--font-syne)',
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
-                        }}>
-                            {act.name ? act.name[0] : '?'}
-                        </div>
-                        <div style={{ flex: 1, overflow: 'hidden' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                                <span style={{ fontSize: '14px', fontWeight: '700', color: '#f1f5f9' }}>{act.name || 'Desconocido'}</span>
-                                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{formatTime(act.timestamp)}</span>
-                            </div>
-                            <p style={{ fontSize: '12px', color: 'var(--text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', margin: 0 }}>
-                                {act.last_message || 'Sin mensajes'}
-                            </p>
-                        </div>
-                        {act.unread_count > 0 && (
+                {chats.length > 0 ? chats.map((act) => {
+                    const displayName = act.pushName || act.name || (act.phone ? `+${act.phone}` : 'Desconocido');
+                    const preview = getMessagePreview({
+                        text: act.last_message,
+                        mediaType: act.mediaType
+                    });
+
+                    return (
+                        <div
+                            key={act.whatsapp_id || act.id}
+                            style={{ display: 'flex', alignItems: 'center', gap: '14px', cursor: 'pointer' }}
+                            className="group"
+                            onClick={() => window.location.href = `/chats?id=${act.id}`}
+                        >
                             <div style={{
-                                width: '18px', height: '18px', borderRadius: '50%',
-                                background: '#7c3aed', color: '#fff', fontSize: '10px',
-                                fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                boxShadow: '0 0 10px rgba(124, 58, 237, 0.4)'
+                                width: '40px', height: '40px', borderRadius: '12px',
+                                backgroundColor: getAvatarColor(act.whatsapp_id || act.id),
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                color: '#fff', fontSize: '14px', fontWeight: '800', fontFamily: 'var(--font-syne)',
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
                             }}>
-                                {act.unread_count}
+                                {displayName[0]}
                             </div>
-                        )}
-                    </div>
-                )) : (
+                            <div style={{ flex: 1, overflow: 'hidden' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                                    <span style={{ fontSize: '14px', fontWeight: '700', color: '#f1f5f9' }}>{displayName}</span>
+                                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{formatTime(act.timestamp)}</span>
+                                </div>
+                                <p style={{ fontSize: '12px', color: 'var(--text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', margin: 0 }}>
+                                    {preview}
+                                </p>
+                            </div>
+                            {act.unread_count > 0 && (
+                                <div style={{
+                                    width: '18px', height: '18px', borderRadius: '50%',
+                                    background: '#7c3aed', color: '#fff', fontSize: '10px',
+                                    fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    boxShadow: '0 0 10px rgba(124, 58, 237, 0.4)'
+                                }}>
+                                    {act.unread_count}
+                                </div>
+                            )}
+                        </div>
+                    );
+                }) : (
                     <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)', fontSize: '13px' }}>
                         Sin actividad de WhatsApp todavía
                     </div>
@@ -708,14 +761,17 @@ const Dashboard = () => {
 
         socket.on('new_whatsapp_message', (data) => {
             const jid = data.whatsapp_id || data.contact_id;
+            const messagePreview = getMessagePreview(data.message);
+
             setRecentChats(prev => {
                 const existingIdx = prev.findIndex(c => (c.whatsapp_id || c.id) === jid);
                 if (existingIdx > -1) {
                     const updatedContact = {
                         ...prev[existingIdx],
-                        last_message: data.message.text,
+                        last_message: messagePreview,
                         timestamp: data.message.timestamp,
-                        unread_count: data.unreadCount
+                        unread_count: data.unreadCount,
+                        pushName: data.message.pushName || prev[existingIdx].pushName
                     };
                     const updatedChats = [...prev];
                     updatedChats.splice(existingIdx, 1);
