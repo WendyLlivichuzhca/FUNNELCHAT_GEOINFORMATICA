@@ -11,7 +11,7 @@ import {
     Position
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Plus, Save, Play, MessageSquare, Split, Send, X, ChevronDown, CheckCircle } from 'lucide-react';
+import { Plus, Save, Play, MessageSquare, Split, Send, X } from 'lucide-react';
 
 // --- Componentes de Nodos Personalizados ---
 
@@ -152,7 +152,7 @@ const Flujos = () => {
 
     // Cargar automatizaciones desde el backend
     useEffect(() => {
-        fetch('http://127.0.0.1:8000/api/automatizaciones', { headers: authHeaders })
+        fetch('http://localhost:8000/api/flows')
             .then(res => res.json())
             .then(data => {
                 if (Array.isArray(data) && data.length > 0) {
@@ -217,7 +217,7 @@ const Flujos = () => {
         setTestInput('');
 
         try {
-            const response = await fetch('http://127.0.0.1:8000/api/flows/test', {
+            const response = await fetch('http://localhost:8000/api/flows/test', {
                 method: 'POST',
                 headers: authHeaders,
                 body: JSON.stringify({ message: userMsg.text, nodes, edges, current_node_id: currentTestNode })
@@ -232,36 +232,7 @@ const Flujos = () => {
 
     const saveFlow = async () => {
         try {
-            let res;
-            if (currentFlowId) {
-                res = await fetch(`http://127.0.0.1:8000/api/automatizaciones/${currentFlowId}`, {
-                    method: 'PUT',
-                    headers: authHeaders,
-                    body: JSON.stringify({ nodos: nodes, conexiones: edges }),
-                });
-            } else {
-                res = await fetch('http://127.0.0.1:8000/api/automatizaciones', {
-                    method: 'POST',
-                    headers: authHeaders,
-                    body: JSON.stringify({ nombre: currentFlowName, tipo_disparador: 'palabra_clave', nodos: nodes, conexiones: edges }),
-                });
-            }
-            const data = await res.json();
-            if (data.status === 'success') {
-                if (!currentFlowId && data.id) setCurrentFlowId(data.id);
-                showSaveToast('Flujo guardado correctamente');
-            } else {
-                showSaveToast(data.detail || 'Error al guardar', 'error');
-            }
-        } catch {
-            showSaveToast('Error de conexión con el servidor', 'error');
-        }
-    };
-
-    const handleCreateNewFlow = async () => {
-        if (!newFlowName.trim()) return;
-        try {
-            const res = await fetch('http://127.0.0.1:8000/api/automatizaciones', {
+            const response = await fetch('http://localhost:8000/api/flows', {
                 method: 'POST',
                 headers: authHeaders,
                 body: JSON.stringify({ nombre: newFlowName, tipo_disparador: 'palabra_clave', nodos: initialNodes, conexiones: initialEdges }),

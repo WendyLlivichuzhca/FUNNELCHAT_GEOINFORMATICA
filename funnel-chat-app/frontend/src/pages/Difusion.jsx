@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Send, Users, MessageSquare, Calendar, TrendingUp, Plus, Clock, CheckCircle, BarChart2, AlertCircle } from 'lucide-react';
+import { Send, Users, MessageSquare, Calendar, TrendingUp, Plus, Clock, CheckCircle, BarChart2 } from 'lucide-react';
 
 const Difusion = () => {
     const [campaigns, setCampaigns] = useState([]);
@@ -7,26 +7,13 @@ const Difusion = () => {
     const [showCreate, setShowCreate] = useState(false);
     const [newCampaign, setNewCampaign] = useState({ nombre: '', mensaje: '', segmento: 'Todos' });
     const [isSending, setIsSending] = useState(false);
-    const [toast, setToast] = useState(null);
 
-    const token = localStorage.getItem('token');
-    const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-
-    const showToast = (msg, type = 'success') => {
-        setToast({ msg, type });
-        setTimeout(() => setToast(null), 3500);
-    };
-
-    const fetchCampaigns = () => {
-        setIsLoading(true);
-        fetch('http://127.0.0.1:8000/api/campanas', { headers: authHeaders })
-            .then(r => r.json())
-            .then(data => { if (Array.isArray(data)) setCampaigns(data); })
-            .catch(err => console.error('Error fetching campaigns:', err))
-            .finally(() => setIsLoading(false));
-    };
-
-    useEffect(() => { fetchCampaigns(); }, []);
+    useEffect(() => {
+        fetch('http://localhost:8000/api/campaigns')
+            .then(res => res.json())
+            .then(data => setCampaigns(data))
+            .catch(err => console.error("Error fetching campaigns:", err));
+    }, []);
 
     const handleCreateCampaign = async () => {
         if (!newCampaign.nombre.trim() || !newCampaign.mensaje.trim()) {
@@ -34,26 +21,29 @@ const Difusion = () => {
             return;
         }
         setIsSending(true);
-        try {
-            const res = await fetch('http://127.0.0.1:8000/api/campanas', {
-                method: 'POST',
-                headers: authHeaders,
-                body: JSON.stringify(newCampaign),
-            });
-            const data = await res.json();
-            if (data.status === 'success' && data.campaign) {
-                setCampaigns(prev => [data.campaign, ...prev]);
-                setShowCreate(false);
-                setNewCampaign({ nombre: '', mensaje: '', segmento: 'Todos' });
-                showToast('Campaña creada correctamente');
-            } else {
-                showToast(data.detail || 'Error al crear campaña', 'error');
+        // Simulación de envío antes de guardar
+        setTimeout(async () => {
+            try {
+                const response = await fetch('http://localhost:8000/api/campaigns', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        ...newCampaign,
+                        sent_count: Math.floor(Math.random() * 500) + 100
+                    })
+                });
+                const data = await response.json();
+                if (data.status === 'success') {
+                    setCampaigns([data.campaign, ...campaigns]);
+                    setShowCreate(false);
+                    setNewCampaign({ name: '', message: '', segment: 'Todos' });
+                }
+            } catch (err) {
+                console.error("Error creating campaign:", err);
+            } finally {
+                setIsSending(false);
             }
-        } catch {
-            showToast('Error de conexión con el servidor', 'error');
-        } finally {
-            setIsSending(false);
-        }
+        }, 2000);
     };
 
     const totalEnviados = campaigns.reduce((s, c) => s + (c.total_enviados || 0), 0);
