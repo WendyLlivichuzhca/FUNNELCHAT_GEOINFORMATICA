@@ -1,0 +1,119 @@
+═══════════════════════════════════════════════════════════════
+         GUÍA DE INSTALACIÓN - FUNNELCHAT BACKEND
+═══════════════════════════════════════════════════════════════
+
+¡ATENCIÓN WENDY! Sigue EXACTAMENTE estos pasos:
+
+═══════════════════════════════════════════════════════════════
+OPCIÓN 1: FORMA MÁS FÁCIL (Recomendado) ⭐
+═══════════════════════════════════════════════════════════════
+
+1. Abre la carpeta backend en tu computadora:
+   C:\Users\Wendy Llivichuzhca\Documents\GEOINFORMATICA\
+   FUNNELCHAT_GEOINFORMATICA\funnel-chat-app\backend
+
+2. BUSCA el archivo: start.bat (es un archivo .bat color gris)
+
+3. HAZE DOBLE CLIC en start.bat
+
+4. ESPERA a que termine (verás varios mensajes en verde)
+
+5. Cuando diga "INFO: Application startup complete"
+   El servidor ya está corriendo! ✓
+
+6. Abre tu navegador y ve a: http://localhost:8000/docs
+
+¡LISTO! Tu API está funcionando.
+
+
+═══════════════════════════════════════════════════════════════
+OPCIÓN 2: SI QUIERES HACER LOS PASOS MANUALMENTE
+═══════════════════════════════════════════════════════════════
+
+PASO 1 - Inicializar la Base de Datos:
+────────────────────────────────────────────────────────────
+1. Busca el archivo: init_db.bat
+2. Haz doble clic
+3. Espera a ver ✓ marcas verdes
+4. Presiona cualquier tecla cuando termine
+
+
+PASO 2 - Iniciar el Servidor:
+────────────────────────────────────────────────────────────
+1. Busca el archivo: run_server.bat
+2. Haz doble clic
+3. Espera a ver: "INFO: Application startup complete"
+4. El servidor está corriendo!
+
+
+═══════════════════════════════════════════════════════════════
+SI ALGO FALLA...
+═══════════════════════════════════════════════════════════════
+
+❌ Error: "No such table: usuarios"
+✓ Solución: Ejecuta PRIMERO init_db.bat, luego run_server.bat
+
+❌ Error: "Puerto 8000 ya está en uso"
+✓ Solución: Cierra otras ventanas de la terminal
+            O cambia el puerto en run_server.bat
+
+❌ Error: "venv no se encuentra"
+✓ Solución: Asegúrate de estar en la carpeta correcta:
+           backend (donde ves main.py y init_db.bat)
+
+❌ El servidor no inicia
+✓ Solución: Abre PowerShell en la carpeta backend y ejecuta:
+           .\venv\Scripts\activate
+           python init_db.py
+           python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+
+═══════════════════════════════════════════════════════════════
+ARCHIVOS IMPORTANTES EN ESTA CARPETA:
+═══════════════════════════════════════════════════════════════
+
+▶ start.bat ..................... USAR ESTO PRIMERO (todo automático)
+▶ init_db.bat ................... Crear tablas de base de datos
+▶ run_server.bat ................ Iniciar el servidor
+▶ main.py ....................... Código del servidor (NO editar si no sabes)
+▶ devices.db .................... Base de datos (se crea automáticamente)
+▶ .env .......................... Configuración (no editar)
+
+
+═══════════════════════════════════════════════════════════════
+CÓMO SABER SI FUNCIONA:
+═══════════════════════════════════════════════════════════════
+
+✓ Abre tu navegador
+✓ Ve a: http://localhost:8000/docs
+✓ Si ves una página azul con "Swagger UI" = ¡FUNCIONA!
+
+O prueba esto en PowerShell:
+   curl http://localhost:8000/docs
+
+
+═══════════════════════════════════════════════════════════════
+ACCESO A LA API:
+═══════════════════════════════════════════════════════════════
+
+Cuando el servidor esté corriendo, accede a:
+
+📍 API Principal ........... http://localhost:8000
+📍 Documentación ........... http://localhost:8000/docs
+📍 Documentación Alt ....... http://localhost:8000/redoc
+
+
+═══════════════════════════════════════════════════════════════
+PARAR EL SERVIDOR:
+═══════════════════════════════════════════════════════════════
+
+Presiona: Ctrl + C en la ventana del servidor
+
+
+═══════════════════════════════════════════════════════════════
+
+¿Preguntas? Revisa SETUP_GUIDE.md en esta carpeta.
+
+¡Buena suerte! 🚀
+
+═══════════════════════════════════════════════════════════════

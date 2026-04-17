@@ -1,0 +1,132 @@
+════════════════════════════════════════════════════════════════
+         INSTRUCCIONES PARA POWERSHELL - FUNNELCHAT
+════════════════════════════════════════════════════════════════
+
+Wendy, estás usando PowerShell. Sigue ESTOS pasos:
+
+════════════════════════════════════════════════════════════════
+OPCIÓN 1: Usar el script de PowerShell (Recomendado)
+════════════════════════════════════════════════════════════════
+
+1. En PowerShell, ejecuta EXACTAMENTE esto:
+
+   .\start.ps1
+
+   (Nota el punto y barra: .\)
+
+2. ESPERA a que termine
+
+3. Verás: "INFO: Uvicorn running on http://0.0.0.0:8000"
+
+4. Abre tu navegador: http://localhost:8000/docs
+
+¡LISTO!
+
+
+════════════════════════════════════════════════════════════════
+OPCIÓN 2: Si el anterior no funciona
+════════════════════════════════════════════════════════════════
+
+PowerShell puede tener restricciones. Intenta esto:
+
+1. En PowerShell, ejecuta:
+
+   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+2. Presiona Y cuando te lo pida
+
+3. Ahora ejecuta:
+
+   .\start.ps1
+
+
+════════════════════════════════════════════════════════════════
+OPCIÓN 3: Cambiar a Símbolo del Sistema (CMD)
+════════════════════════════════════════════════════════════════
+
+Si PowerShell sigue dando problemas:
+
+1. CIERRA PowerShell
+
+2. Presiona: Windows + R
+
+3. Escribe: cmd
+
+4. Presiona Enter
+
+5. En la ventana nueva (Símbolo del Sistema), escribe:
+
+   cd C:\Users\Wendy Llivichuzhca\Documents\GEOINFORMATICA\FUNNELCHAT_GEOINFORMATICA\funnel-chat-app\backend
+
+6. Presiona Enter
+
+7. Escribe:
+
+   start.bat
+
+8. Presiona Enter
+
+¡LISTO! En cmd funcionará directamente.
+
+
+════════════════════════════════════════════════════════════════
+COMANDOS MANUALES EN POWERSHELL
+════════════════════════════════════════════════════════════════
+
+Si prefieres hacer todo paso a paso:
+
+PASO 1: Activar el entorno virtual
+────────────────────────────────────
+.\venv\Scripts\Activate.ps1
+
+
+PASO 2: Inicializar la base de datos
+────────────────────────────────────
+python init_db.py
+
+
+PASO 3: Iniciar el servidor
+────────────────────────────────────
+python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+
+════════════════════════════════════════════════════════════════
+¿QUÉ SIGNIFICA ".\start.ps1"?
+════════════════════════════════════════════════════════════════
+
+PowerShell REQUIERE que le indiques la ruta completa o relativa
+de los archivos.
+
+.     = Carpeta actual
+\     = Separador de carpetas
+start.ps1 = Nombre del archivo
+
+Entonces ".\start.ps1" significa:
+"Ejecuta start.ps1 que está en la carpeta actual"
+
+
+════════════════════════════════════════════════════════════════
+ERRORES COMUNES EN POWERSHELL
+════════════════════════════════════════════════════════════════
+
+❌ "El término 'start.bat' no se reconoce"
+✓ Usa: .\start.bat (con punto y barra)
+
+❌ "No está permitido ejecutar scripts"
+✓ Usa: .\start.ps1
+✓ O ejecuta: Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+❌ "uvicorn no se reconoce"
+✓ Asegúrate de activar venv primero:
+  .\venv\Scripts\Activate.ps1
+
+
+════════════════════════════════════════════════════════════════
+RESUMEN RÁPIDO
+════════════════════════════════════════════════════════════════
+
+EN POWERSHELL:        .\start.ps1
+EN SÍMBOLO DEL SIS.:  start.bat
+
+
+════════════════════════════════════════════════════════════════

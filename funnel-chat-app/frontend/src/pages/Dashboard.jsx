@@ -690,7 +690,7 @@ const ConnectDeviceModal = ({ isOpen, onClose, onConfirm, onQRLink, device }) =>
     );
 };
 
-const Dashboard = () => {
+const Dashboard = ({ onAuthError }) => {
     const [stats, setStats] = useState({
         leads: '0',
         conversations: '0',
@@ -705,6 +705,69 @@ const Dashboard = () => {
     const [recentChats, setRecentChats] = useState([]);
     const [isQRModalOpen, setIsQRModalOpen] = useState(false);
     const [selectedDevice, setSelectedDevice] = useState(null);
+    const devicesList = Array.isArray(devices) ? devices : [];
+    const isConnectionsEmpty = devicesList.length === 0;
+
+    const handleUnauthorized = () => {
+        localStorage.removeItem('token');
+        localStorage.removeItem('username');
+        if (typeof onAuthError === 'function') {
+            onAuthError();
+        }
+    };
+
+    const mergeDeviceIntoState = (deviceData) => {
+        if (!deviceData?.id) return;
+
+        setDevices(prev => {
+            const list = Array.isArray(prev) ? prev : [];
+            const existingIndex = list.findIndex(device => device.id === deviceData.id);
+
+            if (existingIndex === -1) {
+                return [deviceData, ...list];
+            }
+
+            const next = [...list];
+            next[existingIndex] = { ...next[existingIndex], ...deviceData };
+            return next;
+        });
+    };
+
+    const refreshDevices = async () => {
+        const token = localStorage.getItem('token');
+
+        try {
+            const response = await fetch('http://127.0.0.1:8000/api/devices', {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            let data = null;
+            try {
+                data = await response.json();
+            } catch {
+                data = null;
+            }
+
+            if (response.status === 401) {
+                handleUnauthorized();
+                return [];
+            }
+
+            if (!response.ok) {
+                throw new Error(data?.detail || `Error ${response.status}`);
+            }
+
+            const nextDevices = Array.isArray(data) ? data : [];
+            setDevices(nextDevices);
+            return nextDevices;
+        } catch (err) {
+            console.error("Error refreshing devices:", err);
+            return [];
+        }
+    };
 
     useEffect(() => {
         const token = localStorage.getItem('token');
@@ -712,51 +775,89 @@ const Dashboard = () => {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
         };
+        const fetchJson = async (url, options = {}) => {
+            const response = await fetch(url, options);
+            let data = null;
 
-        // Fetch stats
-        fetch('http://127.0.0.1:8000/api/stats', { headers })
-            .then(res => res.json())
-            .then(data => {
-                setStats({
-                    leads: data.leads?.toLocaleString() || '0',
-                    conversations: data.conversations?.toLocaleString() || '0',
-                    conversion_rate: data.conversion_rate || '0%',
-                    automations: data.automations || '0'
-                });
-            })
-            .catch(err => console.error("Error fetching stats:", err));
+            try {
+                data = await response.json();
+            } catch {
+                data = null;
+            }
 
-        // Fetch devices
-        fetch('http://127.0.0.1:8000/api/devices', { headers })
-            .then(res => res.json())
-            .then(data => setDevices(data))
-            .catch(err => console.error("Error fetching devices:", err));
+            if (response.status === 401) {
+                handleUnauthorized();
+                return null;
+            }
 
-        // Fetch recent chats
-        fetch('http://127.0.0.1:8000/api/contacts', { headers })
-            .then(res => res.json())
-            .then(data => {
-                const sorted = Array.isArray(data) ? [...data].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) : [];
+            if (!response.ok) {
+                throw new Error(data?.detail || `Error ${response.status}`);
+            }
+
+            return data;
+        };
+
+        const loadDashboardData = async () => {
+            try {
+                const statsData = await fetchJson('http://127.0.0.1:8000/api/stats', { headers });
+                if (statsData) {
+                    setStats({
+                        leads: statsData.leads?.toLocaleString() || '0',
+                        conversations: statsData.conversations?.toLocaleString() || '0',
+                        conversion_rate: statsData.conversion_rate || '0%',
+                        automations: statsData.automations || '0'
+                    });
+                }
+            } catch (err) {
+                console.error("Error fetching stats:", err);
+            }
+
+            try {
+                const devicesData = await fetchJson('http://127.0.0.1:8000/api/devices', { headers });
+                setDevices(Array.isArray(devicesData) ? devicesData : []);
+            } catch (err) {
+                console.error("Error fetching devices:", err);
+                setDevices([]);
+            }
+
+            try {
+                const contactsData = await fetchJson('http://127.0.0.1:8000/api/contacts', { headers });
+                const sorted = Array.isArray(contactsData) ? [...contactsData].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) : [];
                 setRecentChats(sorted.slice(0, 5));
-            })
-            .catch(err => console.error("Error fetching recent chats:", err));
+            } catch (err) {
+                console.error("Error fetching recent chats:", err);
+                setRecentChats([]);
+            }
+        };
+
+        loadDashboardData();
 
         // Socket.io for Real-time Device Status
         socket.on('device_status', (data) => {
             console.log("Device status update received:", data);
-            setDevices(prev => prev.map(d =>
-                d.id === data.device_id ? { ...d, status: data.status } : d
-            ));
+            setDevices(prev => {
+                const list = Array.isArray(prev) ? prev : [];
+                const exists = list.some(d => d.id === data.device_id);
+
+                if (!exists) {
+                    refreshDevices();
+                    return list;
+                }
+
+                return list.map(d =>
+                    d.id === data.device_id ? { ...d, status: data.status } : d
+                );
+            });
         });
 
         socket.on('contacts_updated', (data) => {
             console.log("Contactos sincronizados correctamente:", data);
-            fetch('http://127.0.0.1:8000/api/contacts', { headers })
-                .then(res => res.json())
+            fetchJson('http://127.0.0.1:8000/api/contacts', { headers })
                 .then(data => {
-                    const sorted = [...data].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+                    const sorted = Array.isArray(data) ? [...data].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) : [];
                     setRecentChats(sorted.slice(0, 5));
-                });
+                })
+                .catch(err => console.error("Error refreshing contacts:", err));
         });
 
         socket.on('new_whatsapp_message', (data) => {
@@ -777,12 +878,12 @@ const Dashboard = () => {
                     updatedChats.splice(existingIdx, 1);
                     return [updatedContact, ...updatedChats].slice(0, 5);
                 } else {
-                    fetch('http://127.0.0.1:8000/api/contacts', { headers })
-                        .then(res => res.json())
+                    fetchJson('http://127.0.0.1:8000/api/contacts', { headers })
                         .then(d => {
-                            const sorted = [...d].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+                            const sorted = Array.isArray(d) ? [...d].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) : [];
                             setRecentChats(sorted.slice(0, 5));
-                        });
+                        })
+                        .catch(err => console.error("Error refreshing contacts after message:", err));
                     return prev;
                 }
             });
@@ -806,8 +907,9 @@ const Dashboard = () => {
             socket.off('contacts_updated');
             socket.off('whatsapp_qr_ready');
             socket.off('sync_progress');
+            socket.off('new_whatsapp_message');
         };
-    }, []);
+    }, [onAuthError]);
 
     const toggleConnection = async (device) => {
         if (device.status === 'desconectado') {
@@ -829,9 +931,17 @@ const Dashboard = () => {
                 },
                 body: JSON.stringify({ device_id: device.id })
             });
+            if (response.status === 401) {
+                handleUnauthorized();
+                return;
+            }
+            if (response.status === 401) {
+                handleUnauthorized();
+                return;
+            }
             const data = await response.json();
             console.log(data.message);
-            setDevices(prev => prev.map(d =>
+            setDevices(prev => (Array.isArray(prev) ? prev : []).map(d =>
                 d.id === device.id ? { ...d, status: 'desconectado' } : d
             ));
         } catch (err) {
@@ -859,7 +969,7 @@ const Dashboard = () => {
             });
             const data = await response.json();
             console.log(data.message);
-            setDevices(prev => prev.map(d =>
+            setDevices(prev => (Array.isArray(prev) ? prev : []).map(d =>
                 d.id === selectedDevice.id ? { ...d, status: 'conectado' } : d
             ));
         } catch (err) {
@@ -867,25 +977,43 @@ const Dashboard = () => {
         }
     };
 
-    const handleOpenQR = async () => {
+    const handleOpenQR = async (deviceOverride = selectedDevice) => {
         setIsModalOpen(false);
 
         // Registrar sesión QR en el backend para vincular contactos al usuario correcto
         const token = localStorage.getItem('token');
         try {
-            await fetch('http://127.0.0.1:8000/api/devices/start-qr', {
+            const response = await fetch('http://127.0.0.1:8000/api/devices/start-qr', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
                 },
-                body: JSON.stringify({ device_id: selectedDevice?.id })
+                body: JSON.stringify({ device_id: deviceOverride?.id })
             });
+            let data = null;
+            try {
+                data = await response.json();
+            } catch {
+                data = null;
+            }
+
+            if (response.status === 401) {
+                handleUnauthorized();
+                return;
+            }
             console.log("Sesión QR registrada para el usuario actual");
+
+            if (data?.device) {
+                mergeDeviceIntoState(data.device);
+                setSelectedDevice(data.device);
+            } else {
+                setSelectedDevice(deviceOverride || null);
+            }
 
             // Si el dispositivo ya figura como conectado en nuestra lista de estado,
             // podemos saltar directamente al paso de sincronización
-            if (selectedDevice?.status === 'conectado') {
+            if ((data?.device || deviceOverride)?.status === 'conectado') {
                 // This `setStep` is for QRModal, but it's not directly accessible here.
                 // The QRModal itself handles its steps based on socket events.
                 // For now, we just open the QR modal.
@@ -917,7 +1045,11 @@ const Dashboard = () => {
 
     const handleFinishQR = async () => {
         setIsQRModalOpen(false);
-        if (!selectedDevice) return;
+        const currentDevice = selectedDevice;
+        if (!currentDevice?.id) {
+            await refreshDevices();
+            return;
+        }
 
         console.log("Simulando sincronización de chats post-QR...");
 
@@ -930,12 +1062,16 @@ const Dashboard = () => {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
                 },
-                body: JSON.stringify({ device_id: selectedDevice.id })
+                body: JSON.stringify({ device_id: currentDevice.id })
             });
+            if (response.status === 401) {
+                handleUnauthorized();
+                return;
+            }
             const data = await response.json();
             console.log(data.message);
-            setDevices(prev => prev.map(d =>
-                d.id === selectedDevice.id ? { ...d, status: 'conectado' } : d
+            setDevices(prev => (Array.isArray(prev) ? prev : []).map(d =>
+                d.id === currentDevice.id ? { ...d, status: 'conectado' } : d
             ));
 
             // Simular recarga de chats
@@ -1178,7 +1314,7 @@ const Dashboard = () => {
                     </button>
                 </div>
                 <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
-                    {devices.map((device, i) => (
+                    {devicesList.map((device, i) => (
                         <ConnectionCard
                             key={device.id}
                             device={device}
@@ -1190,6 +1326,7 @@ const Dashboard = () => {
                         className="animate-premium-entrance"
                         style={{
                             minWidth: '320px', flex: 1,
+                            minHeight: isConnectionsEmpty ? '220px' : 'auto',
                             border: '2px dashed rgba(255,255,255,0.08)',
                             background: 'rgba(255,255,255,0.02)',
                             cursor: 'pointer',
@@ -1197,7 +1334,11 @@ const Dashboard = () => {
                             display: 'flex', flexDirection: 'column', gap: '16px', padding: '32px',
                             alignItems: 'center', justifyContent: 'center',
                             borderRadius: '24px',
-                            animationDelay: `${0.4 + (devices.length * 0.05)}s`
+                            animationDelay: `${0.4 + (devicesList.length * 0.05)}s`
+                        }}
+                        onClick={() => {
+                            setSelectedDevice(null);
+                            setIsModalOpen(true);
                         }}
                         onMouseEnter={(e) => {
                             e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
@@ -1214,9 +1355,9 @@ const Dashboard = () => {
                             width: '52px', height: '52px', borderRadius: '16px', background: 'rgba(255,255,255,0.04)',
                             display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,0.08)'
                         }}>
-                            <Plus size={24} color="#64748b" />
+                            <Plus size={24} color={isConnectionsEmpty ? '#7c3aed' : '#64748b'} />
                         </div>
-                        <div style={{ textAlign: 'center' }}>
+                        <div style={{ textAlign: 'center', maxWidth: '420px' }}>
                             <span style={{
                                 display: 'block',
                                 fontFamily: 'var(--font-syne)',
@@ -1224,14 +1365,68 @@ const Dashboard = () => {
                                 color: '#fff',
                                 fontSize: '16px',
                                 marginBottom: '4px'
-                            }}>Nuevo Dispositivo</span>
+                            }}>{isConnectionsEmpty ? 'Conecta tu primer WhatsApp' : 'Nuevo Dispositivo'}</span>
                             <span style={{
                                 display: 'block',
                                 fontFamily: 'var(--font-dm)',
                                 color: 'var(--text-muted)',
-                                fontSize: '13px'
+                                fontSize: '13px',
+                                opacity: isConnectionsEmpty ? 0 : 1,
+                                height: isConnectionsEmpty ? 0 : 'auto',
+                                overflow: 'hidden'
                             }}>Añade otra conexión</span>
                         </div>
+                        {isConnectionsEmpty && (
+                            <>
+                                <p style={{
+                                    margin: 0,
+                                    color: 'var(--text-muted)',
+                                    fontSize: '13px',
+                                    textAlign: 'center',
+                                    maxWidth: '420px'
+                                }}>
+                                    Escanea un QR para empezar a sincronizar chats y contactos reales.
+                                </p>
+                                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                                    <button
+                                        className="btn-shimmer"
+                                        style={{
+                                            border: 'none',
+                                            borderRadius: '12px',
+                                            padding: '12px 18px',
+                                            background: 'var(--primary-gradient)',
+                                            color: '#fff',
+                                            fontWeight: '700',
+                                            cursor: 'pointer'
+                                        }}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setSelectedDevice(null);
+                                            setIsModalOpen(true);
+                                        }}
+                                    >
+                                        Ver opciones
+                                    </button>
+                                    <button
+                                        style={{
+                                            border: '1px solid rgba(16, 217, 160, 0.24)',
+                                            borderRadius: '12px',
+                                            padding: '12px 18px',
+                                            background: 'rgba(16, 217, 160, 0.10)',
+                                            color: '#10d9a0',
+                                            fontWeight: '700',
+                                            cursor: 'pointer'
+                                        }}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleOpenQR(null);
+                                        }}
+                                    >
+                                        Vincular por QR
+                                    </button>
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
             </section>

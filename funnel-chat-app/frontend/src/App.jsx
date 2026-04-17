@@ -1,13 +1,45 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import Dashboard from './pages/Dashboard';
 import Contactos from './pages/Contactos';
 import Chats from './pages/Chats';
 import Flujos from './pages/Flujos';
 import Difusion from './pages/Difusion';
+import Configuracion from './pages/Configuracion';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
+
+// Sub-componente que puede usar useLocation (debe estar dentro del Router)
+function AppLayout({ username, onLogout }) {
+  const location = useLocation();
+  const isChatsPage = location.pathname === '/chats';
+
+  return (
+    <>
+      <Sidebar username={username} onLogout={onLogout} />
+      <main style={{
+        flex: 1,
+        marginLeft: '260px',
+        padding: isChatsPage ? '0' : '40px 60px',
+        minHeight: '100vh',
+        backgroundColor: 'transparent',
+        position: 'relative',
+        zIndex: 2
+      }}>
+        <Routes>
+          <Route path="/" element={<Dashboard onAuthError={onLogout} />} />
+          <Route path="/contactos" element={<Contactos />} />
+          <Route path="/chats" element={<Chats onAuthError={onLogout} />} />
+          <Route path="/flujos" element={<Flujos />} />
+          <Route path="/difusion" element={<Difusion />} />
+          <Route path="/configuracion" element={<Configuracion />} />
+          <Route path="*" element={<Navigate to="/" />} />
+        </Routes>
+      </main>
+    </>
+  );
+}
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
@@ -64,26 +96,8 @@ function App() {
         <div style={{ position: 'fixed', bottom: '-5%', right: '-5%', width: '400px', height: '400px', background: 'rgba(16, 217, 160, 0.05)', borderRadius: '50%', filter: 'blur(120px)', pointerEvents: 'none', zIndex: 0 }} />
         <div style={{ position: 'fixed', top: '30%', right: '-5%', width: '300px', height: '300px', background: 'rgba(236, 72, 153, 0.04)', borderRadius: '50%', filter: 'blur(120px)', pointerEvents: 'none', zIndex: 0 }} />
 
-        <Sidebar username={username} onLogout={handleLogout} />
-
-        <main style={{
-          flex: 1,
-          marginLeft: '260px',
-          padding: '40px 60px',
-          minHeight: '100vh',
-          backgroundColor: 'transparent',
-          position: 'relative',
-          zIndex: 2
-        }}>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/contactos" element={<Contactos />} />
-            <Route path="/chats" element={<Chats />} />
-            <Route path="/flujos" element={<Flujos />} />
-            <Route path="/difusion" element={<Difusion />} />
-            <Route path="*" element={<Navigate to="/" />} />
-          </Routes>
-        </main>
+        {/* AppLayout maneja el routing con acceso a useLocation */}
+        <AppLayout username={username} onLogout={handleLogout} />
       </div>
     </Router>
   );

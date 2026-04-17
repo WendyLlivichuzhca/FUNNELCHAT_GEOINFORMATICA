@@ -1,0 +1,103 @@
+════════════════════════════════════════════════════════════════
+    INSTRUCCIONES DE REPARACIÓN - FUNNELCHAT
+════════════════════════════════════════════════════════════════
+
+Wendy, el problema es que las dependencias no están instaladas.
+No te preocupes, tengo la solución:
+
+════════════════════════════════════════════════════════════════
+SOLUCIÓN RÁPIDA
+════════════════════════════════════════════════════════════════
+
+OPCIÓN 1: Si estás usando PowerShell
+────────────────────────────────────
+
+Ejecuta ESTO en PowerShell:
+
+  .\repair_venv.ps1
+
+Espera a que termine (puede tomar 5-10 minutos)
+
+Verás mensajes como:
+  ✓ Entorno virtual activado
+  ✓ SQLAlchemy instalado correctamente
+  ✓ REPARACION COMPLETADA
+
+Cuando termine, ejecuta:
+
+  .\start.ps1
+
+
+OPCIÓN 2: Si estás usando Símbolo del Sistema (cmd)
+────────────────────────────────────────────────────
+
+Ejecuta ESTO en cmd:
+
+  repair_venv.bat
+
+Espera a que termine
+
+Cuando termine, ejecuta:
+
+  start.bat
+
+
+════════════════════════════════════════════════════════════════
+¿QUÉ HACE ESE SCRIPT?
+════════════════════════════════════════════════════════════════
+
+El script repair_venv:
+
+1. ✓ Actualiza pip (el gestor de paquetes)
+2. ✓ Instala SQLAlchemy (base de datos)
+3. ✓ Instala FastAPI (framework web)
+4. ✓ Instala Uvicorn (servidor)
+5. ✓ Instala todas las dependencias necesarias
+6. ✓ Verifica que todo funcione
+
+Es como un "doctor" para tu entorno virtual.
+
+
+════════════════════════════════════════════════════════════════
+SI ALGO FALLA
+════════════════════════════════════════════════════════════════
+
+❌ "No se pudo activar el entorno virtual"
+✓ Asegúrate de estar en la carpeta backend
+✓ Abre PowerShell DESDE la carpeta (click derecho → PowerShell)
+
+❌ "Error descargando paquetes"
+✓ Verifica tu conexión a internet
+✓ Intenta de nuevo
+
+❌ Sigue sin funcionar
+✓ Abre PowerShell
+✓ Ejecuta esto manualmente:
+
+  .\venv\Scripts\Activate.ps1
+  python -m pip install --upgrade pip
+  pip install fastapi uvicorn sqlalchemy python-dotenv
+  python -m pip install bcrypt passlib "python-jose[cryptography]" pydantic
+
+
+════════════════════════════════════════════════════════════════
+RESUMEN DE ARCHIVOS NUEVOS
+════════════════════════════════════════════════════════════════
+
+repair_venv.ps1  → Para PowerShell (repara el entorno)
+repair_venv.bat  → Para cmd (repara el entorno)
+REPARA_AQUI.txt  → Este archivo
+
+
+════════════════════════════════════════════════════════════════
+SIGUIENTES PASOS
+════════════════════════════════════════════════════════════════
+
+1. Ejecuta repair_venv (ya sea .ps1 o .bat)
+2. ESPERA a que termine
+3. Ejecuta start.ps1 (o start.bat)
+4. Abre http://localhost:8000/docs
+
+¡LISTO!
+
+════════════════════════════════════════════════════════════════

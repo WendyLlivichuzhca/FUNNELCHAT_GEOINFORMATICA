@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Image, Smile, Paperclip, Search, Check, CheckCheck, MoreVertical, Play, Download, FileText, ArrowLeft, MessageSquare, ExternalLink, Clock } from 'lucide-react';
+import { Send, Image, Smile, Paperclip, Search, Check, CheckCheck, MoreVertical, Play, Download, FileText, ArrowLeft, MessageSquare, ExternalLink, Clock, Edit3, Mic, MicOff, X } from 'lucide-react';
 import io from 'socket.io-client';
 
 const socket = io('http://127.0.0.1:8000', {
@@ -17,6 +17,40 @@ const getAvatarColor = (id) => {
     const str = String(id);
     const sum = str.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
     return AVATAR_COLORS[sum % AVATAR_COLORS.length];
+};
+
+const isGroupJid = (value = '') => String(value).endsWith('@g.us');
+const isLidJid = (value = '') => String(value).includes('@lid');
+const cleanPhone = (value = '') => String(value || '').replace(/@.*$/, '').split(':')[0].trim();
+
+const getVisiblePhone = (contact = {}) => {
+    const phone = cleanPhone(contact.phone || '');
+    if (!phone) return '';
+    if (contact.is_group || isGroupJid(contact.whatsapp_id || '') || isGroupJid(contact.phone || '')) return '';
+    if (isLidJid(contact.whatsapp_id || '') && phone.length > 12 && !phone.startsWith('593')) return '';
+    return phone;
+};
+
+const getContactDisplayName = (contact = {}) => {
+    const visiblePhone = getVisiblePhone(contact);
+    return contact.pushName || contact.name || (visiblePhone ? `+${visiblePhone}` : '') || (contact.is_group ? 'Grupo de WhatsApp' : 'Contacto de WhatsApp');
+};
+
+const getContactSubtitle = (contact = {}) => {
+    if (contact.is_group || isGroupJid(contact.whatsapp_id || '') || isGroupJid(contact.phone || '')) {
+        return 'Grupo de WhatsApp';
+    }
+    const visiblePhone = getVisiblePhone(contact);
+    if (visiblePhone) {
+        return `+${visiblePhone}`;
+    }
+    return 'Numero no disponible';
+};
+
+const getParticipantLabel = (msg = {}) => {
+    if (msg.pushName) return msg.pushName;
+    const participant = cleanPhone(msg.participant || '');
+    return participant ? `+${participant}` : 'Participante';
 };
 
 const formatTime = (ts) => {
@@ -100,6 +134,34 @@ const StatusIcon = ({ status, isBot }) => {
     if (status === 3) return <CheckCheck size={14} color="rgba(255,255,255,0.6)" />; // Grey double check
     if (status === 2) return <Check size={14} color="rgba(255,255,255,0.6)" />; // Single check
     return <Clock size={12} color="rgba(255,255,255,0.4)" />; // Pending
+};
+
+// Componente Avatar con soporte de foto de perfil
+const Avatar = ({ contact, size = 48, borderRadius = '14px', fontSize }) => {
+    const [imgError, setImgError] = useState(false);
+    const displayName = getContactDisplayName(contact);
+    const fSize = fontSize || Math.round(size * 0.38);
+
+    return (
+        <div style={{
+            width: `${size}px`, height: `${size}px`, borderRadius,
+            background: getAvatarColor(contact?.whatsapp_id || contact?.id),
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: `${fSize}px`, fontWeight: '800', color: 'white',
+            flexShrink: 0, overflow: 'hidden', position: 'relative'
+        }}>
+            {contact?.photo_url && !imgError ? (
+                <img
+                    src={contact.photo_url}
+                    alt={displayName}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    onError={() => setImgError(true)}
+                />
+            ) : (
+                displayName.charAt(0).toUpperCase()
+            )}
+        </div>
+    );
 };
 
 const MediaModal = ({ isOpen, onClose, data }) => {
@@ -304,7 +366,7 @@ const ReactionsList = ({ reactions }) => {
     );
 };
 
-const Chats = () => {
+const Chats = ({ onAuthError }) => {
     const [contacts, setContacts] = useState([]);
     const [messages, setMessages] = useState([]);
     const [activeContact, setActiveContact] = useState(null);
@@ -320,11 +382,23 @@ const Chats = () => {
     const [modalData, setModalData] = useState(null);
     const [contextMenu, setContextMenu] = useState(null);
     const [replyingTo, setReplyingTo] = useState(null);
+    const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+    const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+    const [historyMeta, setHistoryMeta] = useState({ hasMore: false, totalCount: 0 });
     const [showScrollButton, setShowScrollButton] = useState(false);
     const [newMessagesCount, setNewMessagesCount] = useState(0);
     const scrollRef = useRef(null);
     const chatEndRef = useRef(null);
+    const fileInputRef = useRef(null);
+    const mediaRecorderRef = useRef(null);
+    const audioChunksRef = useRef([]);
     const isAtBottom = useRef(true);
+    const prependAnchorRef = useRef(null);
+
+    // Estados de grabación de voz
+    const [isRecording, setIsRecording] = useState(false);
+    const [recordingSeconds, setRecordingSeconds] = useState(0);
+    const recordingTimerRef = useRef(null);
 
     const scrollToBottom = (behavior = 'smooth') => {
         chatEndRef.current?.scrollIntoView({ behavior });
@@ -332,6 +406,35 @@ const Chats = () => {
         setShowScrollButton(false);
         isAtBottom.current = true;
     };
+
+    async function loadOlderMessages() {
+        if (!activeContact || isLoadingOlder || !historyMeta.hasMore) {
+            return;
+        }
+
+        const token = localStorage.getItem('token');
+        const chatId = activeContact.whatsapp_id || activeContact.id;
+        if (!chatId) {
+            return;
+        }
+
+        const container = scrollRef.current;
+        prependAnchorRef.current = container
+            ? { scrollHeight: container.scrollHeight, scrollTop: container.scrollTop }
+            : null;
+        setIsLoadingOlder(true);
+
+        try {
+            await fetchJson(`http://127.0.0.1:8000/api/chat/${chatId}/load-more?count=60`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+        } catch (error) {
+            console.error("Error loading older history:", error);
+            setIsLoadingOlder(false);
+            prependAnchorRef.current = null;
+        }
+    }
 
     const handleScroll = (e) => {
         const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
@@ -347,31 +450,127 @@ const Chats = () => {
         }
     };
 
+    const handleScrollLegacy = (e) => {
+        const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+        const distanceToBottom = scrollHeight - scrollTop - clientHeight;
+        const atBottom = distanceToBottom < 100;
+        isAtBottom.current = atBottom;
+
+        if (atBottom) {
+            setShowScrollButton(false);
+            setNewMessagesCount(0);
+        }
+
+        if (scrollTop < 120) {
+            loadOlderMessages();
+        }
+    };
+
     const handleOpenMedia = (type, url, caption) => {
         setModalData({ type, url, caption });
     };
 
+    const handleUnauthorized = () => {
+        localStorage.removeItem('token');
+        localStorage.removeItem('username');
+        if (typeof onAuthError === 'function') {
+            onAuthError();
+        }
+    };
+
+    const mapContactToChat = (contact) => ({
+        id: contact.id,
+        whatsapp_id: contact.whatsapp_id || null,
+        name: contact.name || '',
+        pushName: contact.pushName || '',
+        phone: contact.phone || '',
+        photo_url: contact.photo_url || '',
+        last_message: contact.last_message || '',
+        timestamp: contact.timestamp || 0,
+        unread_count: contact.unread_count || 0,
+        is_group: contact.is_group || false,
+        isOnline: contact.isOnline || false,
+        lastSeen: contact.lastSeen || null,
+        mediaType: contact.mediaType || null,
+        notes: contact.notes || '',
+        participants: contact.participants || [],
+    });
+
+    async function fetchJson(url, options = {}) {
+        const response = await fetch(url, options);
+        let data = null;
+
+        try {
+            data = await response.json();
+        } catch {
+            data = null;
+        }
+
+        if (response.status === 401) {
+            handleUnauthorized();
+            return null;
+        }
+
+        if (!response.ok) {
+            throw new Error(data?.detail || `Error ${response.status}`);
+        }
+
+        return data;
+    }
+
+    async function refreshChats(autoSelectFirst = false) {
+        const token = localStorage.getItem('token');
+        const headers = { 'Authorization': `Bearer ${token}` };
+
+        try {
+            let data = await fetchJson('http://127.0.0.1:8000/api/chats', { headers });
+            let nextContacts = Array.isArray(data) ? data : [];
+
+            if (nextContacts.length === 0) {
+                const contactsData = await fetchJson('http://127.0.0.1:8000/api/contacts', { headers });
+                nextContacts = Array.isArray(contactsData)
+                    ? contactsData
+                        .filter(contact => contact.whatsapp_id)
+                        .map(mapContactToChat)
+                        .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+                    : [];
+            }
+
+            setContacts(nextContacts);
+
+            if (autoSelectFirst && nextContacts.length > 0 && !activeContact) {
+                handleSelectContact(nextContacts[0]);
+            }
+
+            return nextContacts;
+        } catch (err) {
+            console.error("Error fetching chats:", err);
+            setContacts([]);
+            return [];
+        }
+    }
+
     // Cargar contactos al inicio
     useEffect(() => {
-        const token = localStorage.getItem('token');
-        fetch('http://127.0.0.1:8000/api/contacts', {
-            headers: { 'Authorization': `Bearer ${token}` }
-        })
-            .then(res => res.json())
-            .then(data => {
-                const sorted = Array.isArray(data) ? [...data].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) : [];
-                setContacts(sorted);
-                if (sorted.length > 0 && !activeContact) handleSelectContact(sorted[0]);
-            })
-            .catch(err => console.error("Error fetching contacts:", err));
+        refreshChats(true);
     }, []);
 
-    const handleSelectContact = (contact) => {
+    function handleSelectContact(contact) {
         setActiveContact(contact);
+        setIsHistoryLoading(true);
+        setIsLoadingOlder(false);
+        setHistoryMeta({ hasMore: false, totalCount: 0 });
+        prependAnchorRef.current = null;
         setSearchResults(null);
         setSearchTerm('');
         setContactNotes(contact.notes || '');
+        setReplyingTo(null);
         const token = localStorage.getItem('token');
+
+        // Suscribirse a presencia para ver "en línea" y "escribiendo..."
+        if (contact.whatsapp_id) {
+            socket.emit('subscribe_presence', { whatsapp_id: contact.whatsapp_id });
+        }
 
         // Limpiar contador local
         setContacts(prev => prev.map(c =>
@@ -379,16 +578,25 @@ const Chats = () => {
         ));
 
         // Obtener historial
-        fetch(`http://127.0.0.1:8000/api/chat/${contact.id}`, {
+        const chatId = contact.whatsapp_id || contact.id;
+        fetchJson(`http://127.0.0.1:8000/api/chat/${chatId}`, {
             headers: { 'Authorization': `Bearer ${token}` }
         })
-            .then(res => res.json())
             .then(data => {
-                setMessages(data);
-                // PASO 4: Marcar como leído en WhatsApp si hay mensajes
-                if (data.length > 0) {
-                    const lastMsg = data[data.length - 1];
-                    if (lastMsg.sender === 'user') { // Solo si el último es del cliente
+                const history = Array.isArray(data) ? data : [];
+                setMessages(history);
+                setHistoryMeta({
+                    hasMore: history.length > 0,
+                    totalCount: history.length
+                });
+                if (history.length > 0) {
+                    setIsHistoryLoading(false);
+                } else {
+                    setTimeout(() => setIsHistoryLoading(false), 2500);
+                }
+                if (history.length > 0) {
+                    const lastMsg = history[history.length - 1];
+                    if (lastMsg.sender === 'user') {
                         fetch(`http://127.0.0.1:8000/api/chat/read?whatsapp_id=${contact.whatsapp_id}&message_id=${lastMsg.id}`, {
                             method: 'POST',
                             headers: { 'Authorization': `Bearer ${token}` }
@@ -396,8 +604,12 @@ const Chats = () => {
                     }
                 }
             })
-            .catch(err => console.error("Error fetching history:", err));
-    };
+            .catch(err => {
+                setIsHistoryLoading(false);
+                setIsLoadingOlder(false);
+                console.error("Error fetching history:", err);
+            });
+    }
 
     // PASO 4: Búsqueda Global
     useEffect(() => {
@@ -510,7 +722,55 @@ const Chats = () => {
                     return Array.from(existingMap.values())
                         .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
                 });
+                if (activeContact?.whatsapp_id) {
+                    const updatedActive = data.contacts.find(contact =>
+                        (contact.whatsapp_id || contact.id) === activeContact.whatsapp_id ||
+                        cleanPhone(contact.number || contact.phone || '') === cleanPhone(activeContact.phone || '')
+                    );
+                    if (updatedActive) {
+                        setActiveContact(prev => prev ? { ...prev, ...updatedActive } : prev);
+                    }
+                }
             }
+        });
+
+        socket.on('history_ready', (data) => {
+            const jid = data?.whatsapp_id || data?.contact_id;
+            if (!jid || !activeContact) {
+                return;
+            }
+            if (jid !== activeContact.whatsapp_id && jid !== activeContact.id) {
+                return;
+            }
+
+            const history = Array.isArray(data.history) ? data.history : [];
+            setMessages(history);
+            setHistoryMeta({
+                hasMore: Boolean(data?.hasMore),
+                totalCount: Number(data?.totalCount || history.length)
+            });
+            setIsHistoryLoading(false);
+            setIsLoadingOlder(false);
+            if (data?.prepend && prependAnchorRef.current && scrollRef.current) {
+                const previous = prependAnchorRef.current;
+                requestAnimationFrame(() => {
+                    const container = scrollRef.current;
+                    if (container) {
+                        const heightDelta = container.scrollHeight - previous.scrollHeight;
+                        container.scrollTop = previous.scrollTop + heightDelta;
+                    }
+                    prependAnchorRef.current = null;
+                });
+            } else if (history.length > 0 && isAtBottom.current) {
+                setTimeout(() => scrollToBottom(), 100);
+                prependAnchorRef.current = null;
+            } else {
+                prependAnchorRef.current = null;
+            }
+        });
+
+        socket.on('contacts_updated', () => {
+            refreshChats(false);
         });
 
         socket.on('presence_update', (data) => {
@@ -529,17 +789,132 @@ const Chats = () => {
             ));
         });
 
+        // Actualizar foto de perfil cuando el bridge la obtiene
+        socket.on('contact_photo_updated', (data) => {
+            setContacts(prev => prev.map(c =>
+                c.whatsapp_id === data.whatsapp_id
+                    ? { ...c, photo_url: data.photo_url }
+                    : c
+            ));
+            if (activeContact?.whatsapp_id === data.whatsapp_id) {
+                setActiveContact(prev => prev ? { ...prev, photo_url: data.photo_url } : prev);
+            }
+        });
+
+        // Confirmación de multimedia enviada
+        socket.on('media_sent', (data) => {
+            if (!data.success) {
+                console.error('Error enviando media:', data.error);
+            }
+        });
+
         return () => {
             socket.off('new_whatsapp_message');
             socket.off('message_status_update');
             socket.off('sync_progress');
+            socket.off('whatsapp_status');
             socket.off('whatsapp_contacts');
+            socket.off('history_ready');
+            socket.off('contacts_updated');
+            socket.off('presence_update');
+            socket.off('user_typing');
+            socket.off('contact_photo_updated');
+            socket.off('media_sent');
         };
     }, [activeContact]);
 
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
     }, [messages]);
+
+    // Enviar archivo multimedia
+    const handleSendFile = async (file) => {
+        if (!file || !activeContact) return;
+
+        const maxSize = 64 * 1024 * 1024; // 64MB
+        if (file.size > maxSize) {
+            alert('El archivo no puede superar 64MB');
+            return;
+        }
+
+        let mediaType = 'document';
+        if (file.type.startsWith('image/')) mediaType = 'image';
+        else if (file.type.startsWith('video/')) mediaType = 'video';
+        else if (file.type.startsWith('audio/')) mediaType = 'audio';
+
+        // Preview optimista en el chat
+        const tempId = 'temp-' + Date.now();
+        const previewUrl = URL.createObjectURL(file);
+        const newMsg = {
+            id: tempId, text: file.name, sender: 'bot',
+            timestamp: Math.floor(Date.now() / 1000),
+            status: 1, mediaType, fileName: file.name,
+            mediaPath: null, _previewUrl: previewUrl
+        };
+        setMessages(prev => [...prev, newMsg]);
+        setTimeout(() => scrollToBottom(), 100);
+
+        const formData = new FormData();
+        formData.append('to', activeContact.whatsapp_id);
+        formData.append('media_type', mediaType);
+        formData.append('caption', '');
+        formData.append('file', file);
+
+        try {
+            const token = localStorage.getItem('token');
+            await fetch('http://127.0.0.1:8000/api/chat/send-media', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: formData
+            });
+        } catch (e) {
+            console.error('Error enviando media:', e);
+            setMessages(prev => prev.filter(m => m.id !== tempId));
+            alert('Error al enviar el archivo');
+        }
+        // Limpiar el input para permitir enviar el mismo archivo nuevamente
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
+    // Iniciar grabación de voz
+    const startRecording = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+            audioChunksRef.current = [];
+
+            recorder.ondataavailable = (e) => {
+                if (e.data.size > 0) audioChunksRef.current.push(e.data);
+            };
+
+            recorder.onstop = async () => {
+                const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+                const file = new File([blob], `audio-${Date.now()}.webm`, { type: 'audio/webm' });
+                stream.getTracks().forEach(t => t.stop());
+                await handleSendFile(file);
+            };
+
+            mediaRecorderRef.current = recorder;
+            recorder.start();
+            setIsRecording(true);
+            setRecordingSeconds(0);
+            recordingTimerRef.current = setInterval(() => {
+                setRecordingSeconds(s => s + 1);
+            }, 1000);
+        } catch (e) {
+            alert('No se pudo acceder al micrófono: ' + e.message);
+        }
+    };
+
+    // Detener grabación de voz
+    const stopRecording = () => {
+        if (mediaRecorderRef.current && isRecording) {
+            mediaRecorderRef.current.stop();
+            clearInterval(recordingTimerRef.current);
+            setIsRecording(false);
+            setRecordingSeconds(0);
+        }
+    };
 
     const handleSend = () => {
         if (!inputValue.trim() || !activeContact) return;
@@ -665,8 +1040,41 @@ const Chats = () => {
                 <div style={{ padding: '28px 24px', borderBottom: '1px solid var(--border-subtle)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
                         <h3 className="heading-xl">Mensajes</h3>
-                        <div className="p-2 hover:bg-white/5 rounded-lg cursor-pointer transition-colors">
-                            <MoreVertical size={20} className="text-slate-500" />
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                            {/* Botón Nuevo Chat */}
+                            <div
+                                className="p-2 hover:bg-white/5 rounded-lg cursor-pointer transition-colors"
+                                title="Nuevo chat"
+                                onClick={() => {
+                                    const number = prompt('Ingresa el número de WhatsApp:\n(Ej: 593987654321 — con código de país, sin + ni espacios)');
+                                    if (number && number.trim()) {
+                                        const cleanNum = number.trim().replace(/[^0-9]/g, '');
+                                        const jid = `${cleanNum}@s.whatsapp.net`;
+                                        const newContact = {
+                                            id: Date.now(),
+                                            whatsapp_id: jid,
+                                            name: `+${cleanNum}`,
+                                            phone: cleanNum,
+                                            pushName: '',
+                                            last_message: '',
+                                            timestamp: Math.floor(Date.now() / 1000),
+                                            unread_count: 0,
+                                            is_group: false,
+                                            photo_url: ''
+                                        };
+                                        setContacts(prev => {
+                                            const exists = prev.find(c => c.whatsapp_id === jid);
+                                            return exists ? prev : [newContact, ...prev];
+                                        });
+                                        handleSelectContact(newContact);
+                                    }
+                                }}
+                            >
+                                <Edit3 size={18} className="text-slate-500" />
+                            </div>
+                            <div className="p-2 hover:bg-white/5 rounded-lg cursor-pointer transition-colors">
+                                <MoreVertical size={20} className="text-slate-500" />
+                            </div>
                         </div>
                     </div>
                     <div style={{ position: 'relative' }}>
@@ -721,7 +1129,7 @@ const Chats = () => {
 
                     {/* Lista de Contactos Normal */}
                     {!searchResults && filteredContacts.map(contact => {
-                        const displayName = contact.pushName || contact.name || contact.phone || 'Desconocido';
+                        const displayName = getContactDisplayName(contact);
                         const isSelected = activeContact?.whatsapp_id === contact.whatsapp_id;
 
                         return (
@@ -744,22 +1152,7 @@ const Chats = () => {
                                 className={isSelected ? '' : 'hover:bg-white/5'}
                             >
                                 <div style={{ position: 'relative' }}>
-                                    <div style={{
-                                        width: '48px',
-                                        height: '48px',
-                                        borderRadius: '14px',
-                                        background: getAvatarColor(contact.whatsapp_id || contact.id),
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        fontSize: '18px',
-                                        fontWeight: '800',
-                                        color: 'white',
-                                        flexShrink: 0,
-                                        boxShadow: isSelected ? '0 8px 16px -4px rgba(0,0,0,0.3)' : 'none'
-                                    }}>
-                                        {displayName.charAt(0)}
-                                    </div>
+                                    <Avatar contact={contact} size={48} borderRadius="14px" />
                                     {contact.isOnline && (
                                         <div style={{
                                             position: 'absolute', bottom: '2px', right: '2px',
@@ -825,12 +1218,10 @@ const Chats = () => {
                                 }}
                             >
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                                    <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: getAvatarColor(activeContact.whatsapp_id || activeContact.id), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', fontWeight: '800', color: 'white' }}>
-                                        {(activeContact.pushName || activeContact.name || activeContact.phone || '?').charAt(0).toUpperCase()}
-                                    </div>
+                                    <Avatar contact={activeContact} size={42} borderRadius="12px" />
                                     <div style={{ flex: 1, overflow: 'hidden' }}>
                                         <h3 className="heading-base" style={{ fontSize: '15.5px', marginBottom: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                            {activeContact.pushName || activeContact.name || activeContact.phone}
+                                            {getContactDisplayName(activeContact)}
                                         </h3>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                             {(() => {
@@ -868,6 +1259,7 @@ const Chats = () => {
 
                             <div
                                 className="custom-scrollbar"
+                                ref={scrollRef}
                                 onScroll={handleScroll}
                                 style={{
                                     flex: 1,
@@ -880,6 +1272,48 @@ const Chats = () => {
                                     position: 'relative'
                                 }}
                             >
+                                {isLoadingOlder && messages.length > 0 && (
+                                    <div style={{
+                                        alignSelf: 'center',
+                                        padding: '8px 14px',
+                                        borderRadius: '999px',
+                                        border: '1px solid var(--border-subtle)',
+                                        background: 'rgba(255,255,255,0.04)',
+                                        color: 'var(--text-secondary)',
+                                        fontSize: '12px',
+                                        fontWeight: '700',
+                                        marginBottom: '12px'
+                                    }}>
+                                        Cargando mensajes anteriores...
+                                    </div>
+                                )}
+                                {messages.length === 0 && (
+                                    <div style={{
+                                        minHeight: '100%',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        textAlign: 'center',
+                                        padding: '40px'
+                                    }}>
+                                        <div style={{
+                                            maxWidth: '420px',
+                                            padding: '24px',
+                                            borderRadius: '18px',
+                                            border: '1px solid var(--border-subtle)',
+                                            background: 'rgba(255,255,255,0.02)'
+                                        }}>
+                                            <div className="heading-base" style={{ marginBottom: '8px' }}>
+                                                {isHistoryLoading ? 'Cargando historial desde WhatsApp...' : 'Aun no hay historial descargable para este chat'}
+                                            </div>
+                                            <div className="text-small">
+                                                {isHistoryLoading
+                                                    ? 'Estamos esperando que el puente entregue mas mensajes de esta conversacion.'
+                                                    : 'El chat existe y tiene metadata, pero WhatsApp todavia no ha soltado mensajes suficientes para reconstruir esta conversacion como WhatsApp Web.'}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                                 {messages.map((msg, idx) => {
                                     const isBot = msg.sender === 'bot';
                                     const sameAsPrev = idx > 0 && messages[idx - 1].sender === msg.sender;
@@ -930,7 +1364,7 @@ const Chats = () => {
 
                                                 {showName && (
                                                     <div style={{ fontSize: '11px', fontWeight: '800', color: getAvatarColor(msg.participant), marginBottom: '6px', letterSpacing: '0.02em' }}>
-                                                        {msg.pushName || msg.participant?.split('@')[0]}
+                                                        {getParticipantLabel(msg)}
                                                     </div>
                                                 )}
                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1001,49 +1435,113 @@ const Chats = () => {
                                 </div>
                             )}
 
-                            <div style={{ padding: '24px 28px', borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-card)' }}>
+                            <div style={{ padding: '16px 28px', borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-card)' }}>
+                                {/* Indicador de grabación */}
+                                {isRecording && (
+                                    <div style={{
+                                        display: 'flex', alignItems: 'center', gap: '12px',
+                                        padding: '10px 16px', marginBottom: '10px',
+                                        background: 'rgba(239, 68, 68, 0.1)', borderRadius: '12px',
+                                        border: '1px solid rgba(239, 68, 68, 0.3)'
+                                    }}>
+                                        <div style={{
+                                            width: '10px', height: '10px', borderRadius: '50%',
+                                            background: '#ef4444', animation: 'pulse 1s infinite'
+                                        }} />
+                                        <span style={{ color: '#ef4444', fontWeight: '700', fontSize: '13px' }}>
+                                            Grabando... {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:{String(recordingSeconds % 60).padStart(2, '0')}
+                                        </span>
+                                        <button onClick={stopRecording} style={{
+                                            marginLeft: 'auto', background: '#ef4444', color: 'white',
+                                            border: 'none', borderRadius: '8px', padding: '4px 12px',
+                                            cursor: 'pointer', fontWeight: '700', fontSize: '12px'
+                                        }}>
+                                            Enviar
+                                        </button>
+                                        <button onClick={() => {
+                                            if (mediaRecorderRef.current) {
+                                                mediaRecorderRef.current.stream?.getTracks().forEach(t => t.stop());
+                                            }
+                                            clearInterval(recordingTimerRef.current);
+                                            setIsRecording(false);
+                                            setRecordingSeconds(0);
+                                        }} style={{
+                                            background: 'rgba(255,255,255,0.1)', color: 'white',
+                                            border: 'none', borderRadius: '8px', padding: '4px 10px',
+                                            cursor: 'pointer', fontWeight: '700', fontSize: '12px'
+                                        }}>
+                                            Cancelar
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* Input file oculto */}
+                                <input
+                                    type="file"
+                                    ref={fileInputRef}
+                                    onChange={(e) => e.target.files[0] && handleSendFile(e.target.files[0])}
+                                    style={{ display: 'none' }}
+                                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar"
+                                />
+
                                 <div style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '12px',
-                                    backgroundColor: 'var(--bg-hover)',
-                                    padding: '8px 16px',
-                                    borderRadius: '16px',
-                                    border: '1px solid var(--border-subtle)',
+                                    display: 'flex', alignItems: 'center', gap: '12px',
+                                    backgroundColor: 'var(--bg-hover)', padding: '8px 16px',
+                                    borderRadius: '16px', border: '1px solid var(--border-subtle)',
                                     boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)'
                                 }}>
-                                    <div className="p-2 hover:bg-white/5 rounded-full cursor-pointer transition-colors">
+                                    <div className="p-2 hover:bg-white/5 rounded-full cursor-pointer transition-colors" title="Emoji">
                                         <Smile size={20} className="text-slate-500" />
                                     </div>
-                                    <div className="p-2 hover:bg-white/5 rounded-full cursor-pointer transition-colors">
+                                    {/* Botón Adjuntar */}
+                                    <div
+                                        className="p-2 hover:bg-white/5 rounded-full cursor-pointer transition-colors"
+                                        title="Adjuntar archivo"
+                                        onClick={() => fileInputRef.current?.click()}
+                                    >
                                         <Paperclip size={20} className="text-slate-500" />
                                     </div>
                                     <input
                                         type="text"
                                         value={inputValue}
                                         onChange={(e) => setInputValue(e.target.value)}
-                                        onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-                                        placeholder="Escribe tu respuesta aquí..."
+                                        onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+                                        placeholder="Escribe tu mensaje aquí..."
                                         style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text-title)', outline: 'none', padding: '10px 0', fontSize: '14.5px' }}
                                     />
-                                    <div
-                                        onClick={handleSend}
-                                        style={{
-                                            width: '42px',
-                                            height: '42px',
-                                            background: inputValue.trim() ? 'var(--primary-gradient)' : 'rgba(255,255,255,0.05)',
-                                            borderRadius: '12px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            cursor: inputValue.trim() ? 'pointer' : 'default',
-                                            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                                            boxShadow: inputValue.trim() ? '0 10px 15px -3px rgba(99, 102, 241, 0.3)' : 'none',
-                                            transform: inputValue.trim() ? 'scale(1)' : 'scale(0.95)'
-                                        }}
-                                    >
-                                        <Send size={18} color="white" style={{ transform: 'translateX(1px)' }} />
-                                    </div>
+                                    {/* Botón Micrófono o Enviar */}
+                                    {inputValue.trim() ? (
+                                        <div
+                                            onClick={handleSend}
+                                            style={{
+                                                width: '42px', height: '42px',
+                                                background: 'var(--primary-gradient)', borderRadius: '12px',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                cursor: 'pointer', transition: 'all 0.3s',
+                                                boxShadow: '0 10px 15px -3px rgba(99, 102, 241, 0.3)'
+                                            }}
+                                        >
+                                            <Send size={18} color="white" style={{ transform: 'translateX(1px)' }} />
+                                        </div>
+                                    ) : (
+                                        <div
+                                            onClick={isRecording ? stopRecording : startRecording}
+                                            title={isRecording ? 'Detener grabación' : 'Grabar nota de voz'}
+                                            style={{
+                                                width: '42px', height: '42px',
+                                                background: isRecording ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.05)',
+                                                borderRadius: '12px', display: 'flex',
+                                                alignItems: 'center', justifyContent: 'center',
+                                                cursor: 'pointer', transition: 'all 0.3s',
+                                                border: isRecording ? '1px solid rgba(239,68,68,0.4)' : '1px solid transparent'
+                                            }}
+                                        >
+                                            {isRecording
+                                                ? <MicOff size={18} color="#ef4444" />
+                                                : <Mic size={18} color="rgba(255,255,255,0.4)" />
+                                            }
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -1065,25 +1563,11 @@ const Chats = () => {
                                 </div>
                                 <div className="custom-scrollbar" style={{ flex: 1, overflowY: 'auto', padding: '32px 24px' }}>
                                     <div style={{ textAlign: 'center', marginBottom: '40px' }}>
-                                        <div style={{
-                                            width: '120px',
-                                            height: '110px',
-                                            borderRadius: '24px',
-                                            background: getAvatarColor(activeContact.whatsapp_id || activeContact.id),
-                                            margin: '0 auto 24px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            fontSize: '44px',
-                                            fontWeight: '900',
-                                            color: 'white',
-                                            boxShadow: '0 20px 40px -10px rgba(0,0,0,0.4)',
-                                            transform: 'rotate(-2deg)'
-                                        }}>
-                                            {activeContact.name?.charAt(0) || '?'}
+                                        <div style={{ margin: '0 auto 24px', width: '110px', transform: 'rotate(-2deg)' }}>
+                                            <Avatar contact={activeContact} size={110} borderRadius="24px" fontSize={44} />
                                         </div>
-                                        <h2 className="heading-xl" style={{ marginBottom: '6px' }}>{activeContact.name}</h2>
-                                        <p className="text-small" style={{ fontWeight: '600' }}>{activeContact.phone || activeContact.whatsapp_id}</p>
+                                        <h2 className="heading-xl" style={{ marginBottom: '6px' }}>{getContactDisplayName(activeContact)}</h2>
+                                        <p className="text-small" style={{ fontWeight: '600' }}>{getContactSubtitle(activeContact)}</p>
                                     </div>
 
                                     <div style={{ marginBottom: '40px' }}>
@@ -1120,7 +1604,7 @@ const Chats = () => {
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                                 <span className="text-small" style={{ fontWeight: '600' }}>ID WhatsApp</span>
-                                                <span className="text-small" style={{ color: 'var(--text-subtitle)', fontFamily: 'monospace', background: 'var(--bg-hover)', padding: '2px 6px', borderRadius: '4px' }}>{activeContact.whatsapp_id?.split('@')[0]}</span>
+                                                <span className="text-small" style={{ color: 'var(--text-subtitle)', fontFamily: 'monospace', background: 'var(--bg-hover)', padding: '2px 6px', borderRadius: '4px' }}>{cleanPhone(activeContact.whatsapp_id || '') || 'oculto'}</span>
                                             </div>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                                 <span className="text-small" style={{ fontWeight: '600' }}>Tipo de Chat</span>
@@ -1141,10 +1625,10 @@ const Chats = () => {
                                                 {activeContact.participants.map((p, i) => (
                                                     <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '8px', borderRadius: '12px' }} className="hover:bg-white/5 transition-colors">
                                                         <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: getAvatarColor(p.id), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '900', color: 'white' }}>
-                                                            {p.id.charAt(0)}
+                                                            {cleanPhone(p.id || '').charAt(0) || 'P'}
                                                         </div>
                                                         <div style={{ flex: 1, overflow: 'hidden' }}>
-                                                            <div className="text-main" style={{ fontSize: '13px', fontWeight: '600', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.id.split('@')[0]}</div>
+                                                            <div className="text-main" style={{ fontSize: '13px', fontWeight: '600', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cleanPhone(p.id || '') || 'Participante'}</div>
                                                             <div className="text-small" style={{ fontSize: '10px' }}>{p.admin ? (p.admin === 'superadmin' ? 'Creador' : 'Admin') : 'Miembro'}</div>
                                                         </div>
                                                     </div>
@@ -1215,6 +1699,7 @@ const Chats = () => {
                 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
                 @keyframes slideUp { from { opacity: 0; transform: translateY(100%); } to { opacity: 1; transform: translateY(0); } }
                 @keyframes bounce { 0%, 100% { transform: translateY(0) rotate(-90deg); } 50% { transform: translateY(-5px) rotate(-90deg); } }
+                @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
                 
                 .message-container:hover .message-options-btn {
                     opacity: 1 !important;

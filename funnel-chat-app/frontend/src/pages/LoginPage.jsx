@@ -149,7 +149,8 @@ const LoginPage = ({ onLogin, onSwitchToRegister }) => {
 
             if (response.ok) {
                 const data = await response.json();
-                onLogin(data.access_token, username);
+                // Usar el nombre real del usuario (devuelto por el backend) para mostrar en sidebar
+                onLogin(data.access_token, data.nombre || username);
             } else {
                 const data = await response.json();
                 setError(data.detail || 'Error al iniciar sesión');
@@ -325,14 +326,14 @@ const LoginPage = ({ onLogin, onSwitchToRegister }) => {
                 {/* Form */}
                 <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
                     <div>
-                        <label style={{ display: 'block', marginBottom: '10px', fontSize: '10px', fontWeight: '800', color: 'rgba(0, 140, 255, 0.35)', textTransform: 'uppercase', letterSpacing: '2px' }}>Usuario del sistema</label>
+                        <label style={{ display: 'block', marginBottom: '10px', fontSize: '10px', fontWeight: '800', color: 'rgba(0, 140, 255, 0.35)', textTransform: 'uppercase', letterSpacing: '2px' }}>Correo electrónico</label>
                         <div style={{ position: 'relative' }}>
                             <Mail size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', color: '#0066ff', opacity: 0.5, transition: 'all 0.3s' }} className="icon-glow" />
                             <input
-                                type="text"
+                                type="email"
                                 value={username}
-                                onChange={(e) => setUsername(e.target.value)}
-                                placeholder="Ingresa tu usuario"
+                                onChange={(e) => { setUsername(e.target.value); setError(''); }}
+                                placeholder="tu@correo.com"
                                 required
                                 className="input-cyber"
                             />
@@ -350,7 +351,7 @@ const LoginPage = ({ onLogin, onSwitchToRegister }) => {
                             <input
                                 type="password"
                                 value={password}
-                                onChange={(e) => setPassword(e.target.value)}
+                                onChange={(e) => { setPassword(e.target.value); setError(''); }}
                                 placeholder="••••••••"
                                 required
                                 className="input-cyber"

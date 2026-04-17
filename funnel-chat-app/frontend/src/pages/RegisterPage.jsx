@@ -126,7 +126,8 @@ const ParticleBackground = () => {
 
 // --- Main Page Component ---
 const RegisterPage = ({ onRegisterSuccess, onSwitchToLogin }) => {
-    const [username, setUsername] = useState('');
+    const [nombre, setNombre] = useState('');
+    const [correo, setCorreo] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [error, setError] = useState('');
@@ -146,7 +147,7 @@ const RegisterPage = ({ onRegisterSuccess, onSwitchToLogin }) => {
             const response = await fetch('http://127.0.0.1:8000/register', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
+                body: JSON.stringify({ nombre, correo, password })
             });
 
             if (response.ok) {
@@ -324,14 +325,30 @@ const RegisterPage = ({ onRegisterSuccess, onSwitchToLogin }) => {
                 {/* Form */}
                 <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
                     <div>
-                        <label style={{ display: 'block', marginBottom: '10px', fontSize: '10px', fontWeight: '800', color: 'rgba(0, 140, 255, 0.35)', textTransform: 'uppercase', letterSpacing: '2px' }}>Usuario deseado</label>
+                        <label style={{ display: 'block', marginBottom: '10px', fontSize: '10px', fontWeight: '800', color: 'rgba(0, 140, 255, 0.35)', textTransform: 'uppercase', letterSpacing: '2px' }}>Nombre completo</label>
+                        <div style={{ position: 'relative' }}>
+                            <User size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', color: '#0066ff', opacity: 0.5, transition: 'all 0.3s' }} className="icon-glow" />
+                            <input
+                                type="text"
+                                value={nombre}
+                                onChange={(e) => { setNombre(e.target.value); setError(''); }}
+                                placeholder="Tu nombre completo"
+                                required
+                                className="input-cyber"
+                            />
+                            <div className="focus-line" style={{ position: 'absolute', bottom: 0, left: '10%', right: '10%', height: '1px', background: 'linear-gradient(90deg, transparent, #00ccff, transparent)', transform: 'scaleX(0)', transition: 'transform 0.4s ease' }} />
+                        </div>
+                    </div>
+
+                    <div>
+                        <label style={{ display: 'block', marginBottom: '10px', fontSize: '10px', fontWeight: '800', color: 'rgba(0, 140, 255, 0.35)', textTransform: 'uppercase', letterSpacing: '2px' }}>Correo electrónico</label>
                         <div style={{ position: 'relative' }}>
                             <Mail size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', color: '#0066ff', opacity: 0.5, transition: 'all 0.3s' }} className="icon-glow" />
                             <input
-                                type="text"
-                                value={username}
-                                onChange={(e) => setUsername(e.target.value)}
-                                placeholder="Nombre de usuario único"
+                                type="email"
+                                value={correo}
+                                onChange={(e) => { setCorreo(e.target.value); setError(''); }}
+                                placeholder="tu@correo.com"
                                 required
                                 className="input-cyber"
                             />

@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "funnel-chat-app/frontend", "run", "dev"],
+      "port": 5173
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd funnel-chat-app/backend && ./venv/Scripts/uvicorn main:sio_app --host 0.0.0.0 --port 8000"],
+      "port": 8000
+    }
+  ]
+}

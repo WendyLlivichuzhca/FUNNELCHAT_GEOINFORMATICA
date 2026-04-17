@@ -11,7 +11,7 @@ import {
     Position
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Plus, Save, Play, MessageSquare, Split, Send, X } from 'lucide-react';
+import { Plus, Save, Play, MessageSquare, Split, Send, X, ChevronDown, CheckCircle } from 'lucide-react';
 
 // --- Componentes de Nodos Personalizados ---
 
@@ -126,21 +126,52 @@ const Flujos = () => {
     const [testMessages, setTestMessages] = useState([]);
     const [testInput, setTestInput] = useState('');
     const [currentTestNode, setCurrentTestNode] = useState(null);
+    const [saveToast, setSaveToast] = useState(null);
+    const [automatizaciones, setAutomatizaciones] = useState([]);
+    const [currentFlowId, setCurrentFlowId] = useState(null);
+    const [currentFlowName, setCurrentFlowName] = useState('Flujo Principal');
+    const [showFlowSelector, setShowFlowSelector] = useState(false);
+    const [showNewFlowModal, setShowNewFlowModal] = useState(false);
+    const [newFlowName, setNewFlowName] = useState('');
 
-    // Cargar flujo desde el backend
+    const token = localStorage.getItem('token');
+    const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+
+    const showSaveToast = (msg, type = 'success') => {
+        setSaveToast({ msg, type });
+        setTimeout(() => setSaveToast(null), 3000);
+    };
+
+    const loadFlow = (automatizacion) => {
+        setNodes(automatizacion.nodos && automatizacion.nodos.length > 0 ? automatizacion.nodos : initialNodes);
+        setEdges(automatizacion.conexiones && automatizacion.conexiones.length > 0 ? automatizacion.conexiones : initialEdges);
+        setCurrentFlowId(automatizacion.id);
+        setCurrentFlowName(automatizacion.nombre);
+        setShowFlowSelector(false);
+    };
+
+    // Cargar automatizaciones desde el backend
     useEffect(() => {
-        fetch('http://localhost:8000/api/flows')
+        fetch('http://127.0.0.1:8000/api/automatizaciones', { headers: authHeaders })
             .then(res => res.json())
             .then(data => {
-                setNodes(data.nodes || []);
-                setEdges(data.edges || []);
+                if (Array.isArray(data) && data.length > 0) {
+                    setAutomatizaciones(data);
+                    loadFlow(data[0]);
+                } else {
+                    // Sin flujos guardados: usar defaults
+                    setNodes(initialNodes);
+                    setEdges(initialEdges);
+                }
                 setLoading(false);
             })
             .catch(err => {
                 console.error("Error loading flows:", err);
+                setNodes(initialNodes);
+                setEdges(initialEdges);
                 setLoading(false);
             });
-    }, [setNodes, setEdges]);
+    }, []);
 
     const onNodeClick = useCallback((event, node) => {
         setSelectedNode(node);
@@ -186,38 +217,69 @@ const Flujos = () => {
         setTestInput('');
 
         try {
-            const response = await fetch('http://localhost:8000/api/flows/test', {
+            const response = await fetch('http://127.0.0.1:8000/api/flows/test', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    message: userMsg.text,
-                    nodes,
-                    edges,
-                    current_node_id: currentTestNode
-                })
+                headers: authHeaders,
+                body: JSON.stringify({ message: userMsg.text, nodes, edges, current_node_id: currentTestNode })
             });
             const data = await response.json();
             setTestMessages(prev => [...prev, { text: data.response, sender: 'bot', id: Date.now() + 1 }]);
             setCurrentTestNode(data.node_id);
-        } catch (err) {
+        } catch {
             setTestMessages(prev => [...prev, { text: "Error de conexión.", sender: 'bot', id: Date.now() + 1 }]);
         }
     };
 
     const saveFlow = async () => {
         try {
-            const response = await fetch('http://localhost:8000/api/flows', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ nodes, edges })
-            });
-            const data = await response.json();
-            if (data.status === 'success') {
-                alert('¡Flujo guardado con éxito!');
+            let res;
+            if (currentFlowId) {
+                res = await fetch(`http://127.0.0.1:8000/api/automatizaciones/${currentFlowId}`, {
+                    method: 'PUT',
+                    headers: authHeaders,
+                    body: JSON.stringify({ nodos: nodes, conexiones: edges }),
+                });
+            } else {
+                res = await fetch('http://127.0.0.1:8000/api/automatizaciones', {
+                    method: 'POST',
+                    headers: authHeaders,
+                    body: JSON.stringify({ nombre: currentFlowName, tipo_disparador: 'palabra_clave', nodos: nodes, conexiones: edges }),
+                });
             }
-        } catch (err) {
-            console.error("Error saving flow:", err);
-            alert('Error al guardar el flujo');
+            const data = await res.json();
+            if (data.status === 'success') {
+                if (!currentFlowId && data.id) setCurrentFlowId(data.id);
+                showSaveToast('Flujo guardado correctamente');
+            } else {
+                showSaveToast(data.detail || 'Error al guardar', 'error');
+            }
+        } catch {
+            showSaveToast('Error de conexión con el servidor', 'error');
+        }
+    };
+
+    const handleCreateNewFlow = async () => {
+        if (!newFlowName.trim()) return;
+        try {
+            const res = await fetch('http://127.0.0.1:8000/api/automatizaciones', {
+                method: 'POST',
+                headers: authHeaders,
+                body: JSON.stringify({ nombre: newFlowName, tipo_disparador: 'palabra_clave', nodos: initialNodes, conexiones: initialEdges }),
+            });
+            const data = await res.json();
+            if (data.status === 'success' && data.id) {
+                const newAuto = { id: data.id, nombre: newFlowName, nodos: initialNodes, conexiones: initialEdges };
+                setAutomatizaciones(prev => [...prev, newAuto]);
+                setCurrentFlowId(data.id);
+                setCurrentFlowName(newFlowName);
+                setNodes(initialNodes);
+                setEdges(initialEdges);
+                setNewFlowName('');
+                setShowNewFlowModal(false);
+                showSaveToast(`Flujo "${newFlowName}" creado`);
+            }
+        } catch {
+            showSaveToast('Error al crear flujo', 'error');
         }
     };
 
@@ -242,37 +304,84 @@ const Flujos = () => {
 
     return (
         <div className="animate-fade-in" style={{ height: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+
+            {/* Save Toast */}
+            {saveToast && (
+                <div style={{
+                    position: 'fixed', top: '28px', right: '28px', zIndex: 9999,
+                    display: 'flex', alignItems: 'center', gap: '12px',
+                    padding: '14px 22px', borderRadius: '14px',
+                    background: saveToast.type === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
+                    border: `1px solid ${saveToast.type === 'success' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                    backdropFilter: 'blur(16px)', boxShadow: '0 20px 40px -10px rgba(0,0,0,0.5)',
+                }}>
+                    <CheckCircle size={18} color={saveToast.type === 'success' ? '#10d9a0' : '#ef4444'} />
+                    <span style={{ fontSize: '14px', fontWeight: '700', color: 'white' }}>{saveToast.msg}</span>
+                </div>
+            )}
+
             <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                     <h2 className="heading-xl" style={{ fontSize: '28px' }}>Constructor de Flujos</h2>
-                    <p className="text-main">Diseña la inteligencia de tu chatbot visualmente.</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px', position: 'relative' }}>
+                        <p className="text-main">Flujo activo:</p>
+                        <button
+                            onClick={() => setShowFlowSelector(v => !v)}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: '6px',
+                                background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)',
+                                borderRadius: '10px', padding: '5px 12px', cursor: 'pointer', color: '#a78bfa',
+                                fontSize: '13px', fontWeight: '700',
+                            }}
+                        >
+                            {currentFlowName}
+                            <ChevronDown size={13} />
+                        </button>
+                        {showFlowSelector && (
+                            <div style={{
+                                position: 'absolute', top: '36px', left: '80px', zIndex: 200,
+                                background: '#111827', border: '1px solid rgba(255,255,255,0.08)',
+                                borderRadius: '14px', padding: '8px', minWidth: '240px',
+                                boxShadow: '0 20px 40px rgba(0,0,0,0.6)',
+                            }}>
+                                {automatizaciones.map(a => (
+                                    <div
+                                        key={a.id}
+                                        onClick={() => loadFlow(a)}
+                                        style={{
+                                            padding: '10px 14px', borderRadius: '10px', cursor: 'pointer',
+                                            fontSize: '13px', fontWeight: '700',
+                                            color: a.id === currentFlowId ? '#a78bfa' : '#94a3b8',
+                                            background: a.id === currentFlowId ? 'rgba(124,58,237,0.1)' : 'transparent',
+                                        }}
+                                        className="hover:bg-white/5"
+                                    >
+                                        {a.nombre}
+                                    </div>
+                                ))}
+                                <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', marginTop: '6px', paddingTop: '6px' }}>
+                                    <div
+                                        onClick={() => { setShowFlowSelector(false); setShowNewFlowModal(true); }}
+                                        style={{ padding: '10px 14px', borderRadius: '10px', cursor: 'pointer', fontSize: '13px', fontWeight: '700', color: '#10d9a0', display: 'flex', alignItems: 'center', gap: '6px' }}
+                                        className="hover:bg-white/5"
+                                    >
+                                        <Plus size={13} /> Nuevo Flujo
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
                 <div style={{ display: 'flex', gap: '14px' }}>
                     <button
                         onClick={saveFlow}
-                        style={{
-                            background: 'rgba(255,255,255,0.03)',
-                            border: '1px solid var(--border-subtle)',
-                            color: 'white',
-                            padding: '10px 20px',
-                            borderRadius: '12px',
-                            fontWeight: '700',
-                            fontSize: '14px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            cursor: 'pointer'
-                        }}
+                        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)', color: 'white', padding: '10px 20px', borderRadius: '12px', fontWeight: '700', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
                         className="hover:bg-white/5 transition-colors"
                     >
                         <Save size={18} />
                         Guardar Flujo
                     </button>
-                    <button
-                        onClick={() => setShowTestChat(true)}
-                        className="btn-primary"
-                        style={{ height: '44px' }}
-                    >
+                    <button onClick={() => setShowTestChat(true)} className="btn-primary" style={{ height: '44px' }}>
                         <Play size={18} fill="currentColor" />
                         Probar Simulador
                     </button>
@@ -419,6 +528,38 @@ const Flujos = () => {
                     </div>
                 )}
             </div>
+
+            {/* Modal de Nuevo Flujo */}
+            {showNewFlowModal && (
+                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(5,5,10,0.85)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(12px)' }}>
+                    <div className="glass-card" style={{ width: '420px', padding: '40px', border: '1px solid var(--border-subtle)', boxShadow: '0 40px 80px rgba(0,0,0,0.7)' }}>
+                        <h3 className="heading-xl" style={{ fontSize: '22px', marginBottom: '8px' }}>Nuevo Flujo</h3>
+                        <p className="text-main" style={{ fontSize: '13px', marginBottom: '28px' }}>Crea un nuevo flujo de automatización desde cero.</p>
+                        <label className="text-small" style={{ display: 'block', marginBottom: '10px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Nombre del Flujo</label>
+                        <input
+                            type="text"
+                            value={newFlowName}
+                            onChange={e => setNewFlowName(e.target.value)}
+                            onKeyPress={e => e.key === 'Enter' && handleCreateNewFlow()}
+                            className="input-styled"
+                            style={{ width: '100%', fontSize: '14px', marginBottom: '24px' }}
+                            placeholder="Ej: Flujo de Bienvenida"
+                            autoFocus
+                        />
+                        <div style={{ display: 'flex', gap: '12px' }}>
+                            <button
+                                onClick={() => setShowNewFlowModal(false)}
+                                style={{ flex: 1, height: '44px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)', color: 'white', borderRadius: '12px', fontWeight: '700', cursor: 'pointer' }}
+                            >
+                                Cancelar
+                            </button>
+                            <button onClick={handleCreateNewFlow} className="btn-primary" style={{ flex: 1, height: '44px' }}>
+                                <Plus size={16} /> Crear Flujo
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Modal de Chat de Prueba */}
             {showTestChat && (

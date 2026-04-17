@@ -6,6 +6,33 @@ const socket = io('http://127.0.0.1:8000', {
     transports: ['websocket']
 });
 
+const isGroupJid = (value = '') => String(value).endsWith('@g.us');
+const isLidJid = (value = '') => String(value).includes('@lid');
+const cleanPhone = (value = '') => String(value || '').replace(/@.*$/, '').split(':')[0].trim();
+
+const hasVisiblePhone = (contact) => {
+    const phone = cleanPhone(contact.phone || '');
+    if (!phone) return false;
+    if (contact.is_group || isGroupJid(contact.whatsapp_id || '') || isGroupJid(contact.phone || '')) return false;
+    if (isLidJid(contact.whatsapp_id || '') && phone.length > 12 && !phone.startsWith('593')) return false;
+    return true;
+};
+
+const getDisplayName = (contact) => {
+    const visiblePhone = hasVisiblePhone(contact) ? `+${cleanPhone(contact.phone)}` : '';
+    return contact.pushName || contact.name || visiblePhone || (contact.is_group ? 'Grupo de WhatsApp' : 'Contacto de WhatsApp');
+};
+
+const getContactSubtitle = (contact) => {
+    if (contact.is_group || isGroupJid(contact.whatsapp_id || '') || isGroupJid(contact.phone || '')) {
+        return 'Grupo de WhatsApp';
+    }
+    if (hasVisiblePhone(contact)) {
+        return `+${cleanPhone(contact.phone)}`;
+    }
+    return 'Numero no disponible';
+};
+
 const Contactos = () => {
     const [contacts, setContacts] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
@@ -58,7 +85,7 @@ const Contactos = () => {
     }, [fetchContacts]);
 
     const filteredContacts = contacts.filter(contact => {
-        const displayName = (contact.pushName || contact.name || contact.phone || '').toLowerCase();
+        const displayName = getDisplayName(contact).toLowerCase();
         const searchStr = (displayName + ' ' + (contact.email || '')).toLowerCase();
         const matchesSearch = searchStr.includes(searchTerm.toLowerCase());
         const matchesFilter = activeFilter === 'Todos' || contact.status === activeFilter || contact.tag === activeFilter;
@@ -223,20 +250,20 @@ const Contactos = () => {
                                                 color: 'white',
                                                 boxShadow: '0 8px 15px -3px rgba(99, 102, 241, 0.3)'
                                             }}>
-                                                {(contact.pushName || contact.name || contact.phone || '?').charAt(0).toUpperCase()}
+                                                {getDisplayName(contact).charAt(0).toUpperCase()}
                                             </div>
-                                            <span className="heading-base" style={{ fontSize: '15px' }}>{contact.pushName || contact.name || contact.phone || 'Desconocido'}</span>
+                                            <span className="heading-base" style={{ fontSize: '15px' }}>{getDisplayName(contact)}</span>
                                         </div>
                                     </td>
                                     <td style={{ padding: '16px', borderBottom: '1px solid var(--border-subtle)' }}>
                                         <div className="text-main" style={{ fontSize: '13.5px', fontWeight: '500' }}>
-                                            {contact.phone ? (
+                                            {getContactSubtitle(contact) !== 'Numero no disponible' ? (
                                                 <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                     <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#25D366' }}></div>
-                                                    <span style={{ color: 'var(--text-subtitle)' }}>+{contact.phone}</span>
+                                                    <span style={{ color: 'var(--text-subtitle)' }}>{getContactSubtitle(contact)}</span>
                                                 </span>
                                             ) : (
-                                                <span style={{ color: 'var(--text-secondary)' }}>{contact.email || '—'}</span>
+                                                <span style={{ color: 'var(--text-secondary)' }}>{getContactSubtitle(contact)}</span>
                                             )}
                                         </div>
                                     </td>
@@ -318,11 +345,11 @@ const Contactos = () => {
                                     boxShadow: '0 15px 30px -5px rgba(99, 102, 241, 0.4)',
                                     transform: 'rotate(-3deg)'
                                 }}>
-                                    {(selectedContact.pushName || selectedContact.name || selectedContact.phone || '?').charAt(0).toUpperCase()}
+                                    {getDisplayName(selectedContact).charAt(0).toUpperCase()}
                                 </div>
                                 <div>
-                                    <h3 className="heading-xl" style={{ fontSize: '26px', marginBottom: '4px' }}>{selectedContact.pushName || selectedContact.name || selectedContact.phone || 'Desconocido'}</h3>
-                                    <p className="text-main" style={{ fontWeight: '600', color: 'var(--primary)' }}>{selectedContact.email || (selectedContact.phone ? `+${selectedContact.phone}` : 'Lead de WhatsApp')}</p>
+                                    <h3 className="heading-xl" style={{ fontSize: '26px', marginBottom: '4px' }}>{getDisplayName(selectedContact)}</h3>
+                                    <p className="text-main" style={{ fontWeight: '600', color: 'var(--primary)' }}>{selectedContact.email || getContactSubtitle(selectedContact)}</p>
                                 </div>
                             </div>
                             <button onClick={() => setSelectedContact(null)} style={{
