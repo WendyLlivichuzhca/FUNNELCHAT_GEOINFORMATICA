@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Send, Image, Smile, Paperclip, Search, Check, CheckCheck, MoreVertical, Play, Download, FileText, ArrowLeft, MessageSquare, ExternalLink, Clock, Edit3, Mic, MicOff, X } from 'lucide-react';
 import io from 'socket.io-client';
 import { API_URL, SOCKET_URL } from '../config/api';
+import * as db from '../utils/db';
+import { loadChatHistory as loadFromStore, requestMoreHistory } from '../utils/whatsappStore';
 
 const socket = io(SOCKET_URL, {
     transports: ['websocket']
@@ -382,6 +384,7 @@ const Chats = ({ onAuthError }) => {
     const [contactNotes, setContactNotes] = useState('');
     const [modalData, setModalData] = useState(null);
     const [contextMenu, setContextMenu] = useState(null);
+    const [editingMessage, setEditingMessage] = useState(null);
     const [replyingTo, setReplyingTo] = useState(null);
     const [isHistoryLoading, setIsHistoryLoading] = useState(false);
     const [isLoadingOlder, setIsLoadingOlder] = useState(false);
@@ -426,16 +429,49 @@ const Chats = ({ onAuthError }) => {
         setIsLoadingOlder(true);
 
         try {
-            await fetchJson(`http://127.0.0.1:8000/api/chat/${chatId}/load-more?count=60`, {
+            const data = await fetchJson(`http://127.0.0.1:8000/api/chat/${chatId}/load-more?count=60`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` }
             });
+            
+            if (data && data.status === 'ok') {
+                setHistoryMeta(prev => ({ ...prev, hasMore: true }));
+            }
         } catch (error) {
             console.error("Error loading older history:", error);
+        } finally {
             setIsLoadingOlder(false);
-            prependAnchorRef.current = null;
         }
     }
+
+    const loadNewerMessages = async () => {
+        if (!activeContact || isLoadingOlder) {
+            return;
+        }
+
+        const token = localStorage.getItem('token');
+        const chatId = activeContact.whatsapp_id || activeContact.id;
+        if (!chatId) {
+            return;
+        }
+
+        setIsLoadingOlder(true);
+
+        try {
+            const data = await fetchJson(`http://127.0.0.1:8000/api/chat/${chatId}/load-more?count=30`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            
+            if (data && data.status === 'ok') {
+                setHistoryMeta(prev => ({ ...prev, hasMore: true }));
+            }
+        } catch (error) {
+            console.error("Error loading newer history:", error);
+        } finally {
+            setIsLoadingOlder(false);
+        }
+    };
 
     const handleScroll = (e) => {
         const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
@@ -448,6 +484,11 @@ const Chats = ({ onAuthError }) => {
             setNewMessagesCount(0);
         } else if (distanceToBottom > 300) {
             // No hacemos nada automático, pero el estado de isAtBottom ya es false
+        }
+
+        // Cargar más mensajes cuando hace scroll arriba (paginado infinito real)
+        if (scrollTop < 150 && historyMeta.hasMore && !isLoadingOlder) {
+            loadOlderMessages();
         }
     };
 
@@ -551,22 +592,39 @@ const Chats = ({ onAuthError }) => {
         }
     }
 
-    // Cargar contactos al inicio
+    // Cargar chats al inicio (solo conversaciones activas, no todos los contactos del celular)
     useEffect(() => {
         const token = localStorage.getItem('token');
-        fetch('http://127.0.0.1:8000/api/contacts', {
+        fetch('http://127.0.0.1:8000/api/chats', {
             headers: { 'Authorization': `Bearer ${token}` }
         })
             .then(res => res.json())
             .then(data => {
-                const sorted = Array.isArray(data) ? [...data].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) : [];
+                let sorted = Array.isArray(data) ? [...data].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) : [];
+                // Fallback: si /api/chats está vacío, cargar contactos que tengan último mensaje
+                if (sorted.length === 0) {
+                    return fetch('http://127.0.0.1:8000/api/contacts', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    })
+                        .then(res => res.json())
+                        .then(contactsData => {
+                            sorted = Array.isArray(contactsData)
+                                ? contactsData
+                                    .filter(c => c.whatsapp_id && (c.last_message || c.timestamp))
+                                    .map(mapContactToChat)
+                                    .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+                                : [];
+                            setContacts(sorted);
+                            if (sorted.length > 0 && !activeContact) handleSelectContact(sorted[0]);
+                        });
+                }
                 setContacts(sorted);
                 if (sorted.length > 0 && !activeContact) handleSelectContact(sorted[0]);
             })
-            .catch(err => console.error("Error fetching contacts:", err));
+            .catch(err => console.error("Error fetching chats:", err));
     }, []);
 
-    function handleSelectContact(contact) {
+    const handleSelectContact = async (contact) => {
         setActiveContact(contact);
         setIsHistoryLoading(true);
         setIsLoadingOlder(false);
@@ -588,29 +646,67 @@ const Chats = ({ onAuthError }) => {
             c.whatsapp_id === contact.whatsapp_id ? { ...c, unread_count: 0 } : c
         ));
 
-        // Obtener historial
-        fetch(`http://127.0.0.1:8000/api/chat/${contact.id}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        })
-            .then(data => {
-                setMessages(data);
-                // PASO 4: Marcar como leído en WhatsApp si hay mensajes
-                if (data.length > 0) {
-                    const lastMsg = data[data.length - 1];
-                    if (lastMsg.sender === 'user') { // Solo si el último es del cliente
-                        fetch(`http://127.0.0.1:8000/api/chat/read?whatsapp_id=${contact.whatsapp_id}&message_id=${lastMsg.id}`, {
+        // Cargar historial desde IndexedDB LOCAL PRIMERO (rápido)
+        const chatId = contact.whatsapp_id || contact.id;
+        console.log('[Chats] Cargando chat:', chatId);
+        
+        try {
+            const history = await loadFromStore(chatId);
+            console.log('[Chats] Historial desde IndexedDB:', history && history.messages ? `${history.messages.length} mensajes` : 'vacío');
+            
+            if (history && history.messages && history.messages.length > 0) {
+                // Tenemos caché local, mostramos inmediatamente
+                setMessages(history.messages);
+                setHistoryMeta({
+                    hasMore: history.hasMore || false,
+                    totalCount: history.totalCount || history.messages.length
+                });
+                
+                // Marcar como leído si es necesario
+                const lastMsg = history.messages[history.messages.length - 1];
+                if (lastMsg.sender === 'user') {
+                    fetch(`http://127.0.0.1:8000/api/chat/read?whatsapp_id=${contact.whatsapp_id}&message_id=${lastMsg.id}`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    }).catch(e => console.error("Error al sincronizar lectura:", e));
+                }
+            } else {
+                // No hay caché local, pedir al backend
+                console.log('[Chats] No hay caché local, fetch al backend...');
+                const res = await fetch(`http://127.0.0.1:8000/api/chat/${contact.id}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) throw new Error('Error fetching history');
+                const data = await res.json();
+                const messagesArray = Array.isArray(data) ? data : [];
+                setMessages(messagesArray);
+                
+                // Guardar en IndexedDB para próxima vez
+                if (messagesArray.length > 0) {
+                    await db.put(db.STORES.MESSAGES, messagesArray.map(m => ({
+                        ...m,
+                        chatJid: chatId
+                    })));
+                }
+                
+                if (messagesArray.length > 0) {
+                    const lastMsg = messagesArray[messagesArray.length - 1];
+                    if (lastMsg.sender === 'user') {
+                        await fetch(`http://127.0.0.1:8000/api/chat/read?whatsapp_id=${contact.whatsapp_id}&message_id=${lastMsg.id}`, {
                             method: 'POST',
                             headers: { 'Authorization': `Bearer ${token}` }
                         }).catch(e => console.error("Error al sincronizar lectura:", e));
                     }
                 }
-            })
-            .catch(err => {
-                setIsHistoryLoading(false);
-                setIsLoadingOlder(false);
-                console.error("Error fetching history:", err);
-            });
-    }
+            }
+        } catch (err) {
+            console.error('[Chats] Error cargando historial:', err);
+            setMessages([]);
+        } finally {
+            setIsHistoryLoading(false);
+            setIsLoadingOlder(false);
+        }
+        }
 
     // PASO 4: Búsqueda Global
     useEffect(() => {
@@ -666,7 +762,13 @@ const Chats = ({ onAuthError }) => {
             });
 
             if (activeContact && (jid === activeContact.whatsapp_id || jid === activeContact.id)) {
-                setMessages(prev => [...prev, data.message]);
+                setMessages(prev => {
+                    if (!Array.isArray(prev)) {
+                        console.warn('Messages no era array en new_whatsapp_message, reseteando');
+                        return [data.message];
+                    }
+                    return [...prev, data.message];
+                });
 
                 if (isAtBottom.current) {
                     setTimeout(() => scrollToBottom(), 100);
@@ -770,8 +872,21 @@ const Chats = ({ onAuthError }) => {
             }
         });
 
-        socket.on('contacts_updated', () => {
-            refreshChats(false);
+        socket.on('contacts_updated', (updatedData) => {
+            // Merge suave: solo actualizar campos que cambiaron, sin reemplazar toda la lista
+            if (updatedData && Array.isArray(updatedData.contacts)) {
+                setContacts(prev => {
+                    const map = new Map(prev.map(c => [c.whatsapp_id || c.id, c]));
+                    updatedData.contacts.forEach(upd => {
+                        const key = upd.whatsapp_id || upd.id;
+                        if (map.has(key)) {
+                            map.set(key, { ...map.get(key), ...upd });
+                        }
+                    });
+                    return Array.from(map.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+                });
+            }
+            // Si no trae datos, no hacemos nada (evita el full-reload que borra mensajes)
         });
 
         socket.on('presence_update', (data) => {
@@ -790,17 +905,79 @@ const Chats = ({ onAuthError }) => {
             ));
         });
 
+        socket.on('message_edited', (data) => {
+            const { message_id, new_text } = data;
+            setMessages(prev => {
+                if (!Array.isArray(prev)) {
+                    console.warn('Messages no era array en message_edited, reseteando');
+                    return [];
+                }
+                return prev.map(m =>
+                    m.id === message_id ? { ...m, text: new_text, edited: true } : m
+                );
+            });
+        });
+
+        socket.on('message_deleted', (data) => {
+            const { message_id } = data;
+            setMessages(prev => {
+                if (!Array.isArray(prev)) {
+                    console.warn('Messages no era array en message_deleted, reseteando');
+                    return [];
+                }
+                return prev.map(m =>
+                    m.id === message_id ? { ...m, isDeleted: true, text: '🚫 Este mensaje fue eliminado' } : m
+                );
+            });
+        });
+
+        socket.on('whatsapp_reaction', (data) => {
+            const { message_id, emoji, sender } = data;
+            setMessages(prev => {
+                if (!Array.isArray(prev)) {
+                    console.warn('Messages no era array en whatsapp_reaction, reseteando');
+                    return [];
+                }
+                return prev.map(m => {
+                    if (m.id === message_id) {
+                        const reactions = { ...(m.reactions || {}) };
+                        reactions[emoji] = (reactions[emoji] || 0) + 1;
+                        return { ...m, reactions };
+                    }
+                    return m;
+                });
+            });
+        });
+
+        socket.on('messages_marked_read', (data) => {
+            const { jid, count } = data;
+            setContacts(prev => prev.map(c =>
+                c.whatsapp_id === jid ? { ...c, unread_count: 0 } : c
+            ));
+        });
+
         return () => {
             socket.off('new_whatsapp_message');
             socket.off('message_status_update');
             socket.off('sync_progress');
             socket.off('whatsapp_status');
             socket.off('whatsapp_contacts');
+            socket.off('history_ready');
+            socket.off('contacts_updated');
+            socket.off('presence_update');
+            socket.off('user_typing');
+            socket.off('message_edited');
+            socket.off('message_deleted');
+            socket.off('whatsapp_reaction');
+            socket.off('messages_marked_read');
         };
     }, [activeContact]);
 
     useEffect(() => {
-        chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
+        // Solo hacer auto-scroll si el usuario ya estaba al fondo
+        if (isAtBottom.current) {
+            chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
+        }
     }, [messages]);
 
     // Enviar archivo multimedia
@@ -827,7 +1004,10 @@ const Chats = ({ onAuthError }) => {
             status: 1, mediaType, fileName: file.name,
             mediaPath: null, _previewUrl: previewUrl
         };
-        setMessages(prev => [...prev, newMsg]);
+        setMessages(prev => {
+                if (!Array.isArray(prev)) return [newMsg];
+                return [...prev, newMsg];
+            });
         setTimeout(() => scrollToBottom(), 100);
 
         const formData = new FormData();
@@ -845,7 +1025,10 @@ const Chats = ({ onAuthError }) => {
             });
         } catch (e) {
             console.error('Error enviando media:', e);
-            setMessages(prev => prev.filter(m => m.id !== tempId));
+            setMessages(prev => {
+                if (!Array.isArray(prev)) return [];
+                return prev.filter(m => m.id !== tempId);
+            });
             alert('Error al enviar el archivo');
         }
         // Limpiar el input para permitir enviar el mismo archivo nuevamente
@@ -923,7 +1106,10 @@ const Chats = ({ onAuthError }) => {
             } : null
         };
 
-        setMessages(prev => [...prev, newMessage]);
+        setMessages(prev => {
+                if (!Array.isArray(prev)) return [newMessage];
+                return [...prev, newMessage];
+            });
         setInputValue('');
         setReplyingTo(null);
         setTimeout(() => scrollToBottom(), 100);
@@ -966,6 +1152,116 @@ const Chats = ({ onAuthError }) => {
                 }
             })
             .catch(err => console.error("Error saving notes:", err));
+    };
+
+    const handleEditMessage = (msg) => {
+        if (!msg || msg.sender !== 'bot') {
+            alert('Solo puedes editar tus propios mensajes');
+            return;
+        }
+        setEditingMessage(msg);
+        setInputValue(msg.text || '');
+    };
+
+    const handleSaveEdit = async () => {
+        if (!editingMessage || !inputValue.trim()) return;
+        
+        const token = localStorage.getItem('token');
+        try {
+            await fetch(`${API_URL}/api/chat/edit-message`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    message_id: editingMessage.id,
+                    new_text: inputValue.trim()
+                })
+            });
+            
+            setMessages(prev => {
+                if (!Array.isArray(prev)) {
+                    console.warn('Messages no era array en handleSaveEdit, reseteando');
+                    return [];
+                }
+                return prev.map(m =>
+                    m.id === editingMessage.id ? { ...m, text: inputValue.trim(), edited: true } : m
+                );
+            });
+            
+            setEditingMessage(null);
+            setInputValue('');
+            alert('Mensaje editado');
+        } catch (e) {
+            console.error('Error editando mensaje:', e);
+            alert('Error al editar mensaje');
+        }
+    };
+
+    const handleDeleteMessage = async (msg, deleteForEveryone = false) => {
+        if (!msg) return;
+        
+        const token = localStorage.getItem('token');
+        try {
+            await fetch(`${API_URL}/api/chat/delete-message`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    message_id: msg.id,
+                    jid: activeContact.whatsapp_id,
+                    delete_for_everyone: deleteForEveryone
+                })
+            });
+            
+            setMessages(prev => {
+                if (!Array.isArray(prev)) {
+                    console.warn('Messages no era array en handleDeleteMessage, reseteando');
+                    return [];
+                }
+                return prev.map(m =>
+                    m.id === msg.id ? { ...m, isDeleted: true, text: '🚫 Este mensaje fue eliminado' } : m
+                );
+            });
+        } catch (e) {
+            console.error('Error eliminando mensaje:', e);
+            alert('Error al eliminar mensaje');
+        }
+    };
+
+    const handleSendReaction = async (msg, reaction) => {
+        if (!msg || !activeContact) return;
+        
+        const token = localStorage.getItem('token');
+        try {
+            await fetch(`${API_URL}/api/chat/react`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    message_id: msg.id,
+                    jid: activeContact.whatsapp_id,
+                    reaction: reaction
+                })
+            });
+            
+            setMessages(prev => {
+                if (!Array.isArray(prev)) {
+                    console.warn('Messages no era array en handleSendReaction, reseteando');
+                    return [];
+                }
+                return prev.map(m =>
+                    m.id === msg.id ? { ...m, reactions: { [reaction]: (m.reactions?.[reaction] || 0) + 1 } } : m
+                );
+            });
+        } catch (e) {
+            console.error('Error enviando reacción:', e);
+        }
     };
 
     const filteredContacts = Array.isArray(contacts) ? contacts.filter(c =>
@@ -1302,10 +1598,20 @@ const Chats = ({ onAuthError }) => {
                                         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                     };
 
+                                    const handleMessageContextMenu = (e) => {
+                                        e.preventDefault();
+                                        setContextMenu({
+                                            x: e.clientX,
+                                            y: e.clientY,
+                                            msg: msg
+                                        });
+                                    };
+
                                     return (
                                         <div
                                             key={idx}
                                             id={`msg-${msg.id || idx}`}
+                                            onContextMenu={handleMessageContextMenu}
                                             style={{
                                                 alignSelf: isBot ? 'flex-end' : 'flex-start',
                                                 maxWidth: '75%',
@@ -1477,18 +1783,44 @@ const Chats = ({ onAuthError }) => {
                                     >
                                         <Paperclip size={20} className="text-slate-500" />
                                     </div>
+                                    {editingMessage && (
+                                        <div style={{
+                                            display: 'flex', alignItems: 'center', gap: '8px',
+                                            padding: '8px 14px', background: 'rgba(99, 102, 241, 0.15)',
+                                            borderRadius: '10px', marginBottom: '8px', border: '1px solid var(--primary)'
+                                        }}>
+                                            <Edit3 size={14} style={{ color: 'var(--primary)' }} />
+                                            <span style={{ flex: 1, fontSize: '12px', color: 'var(--primary)' }}>
+                                                Editando mensaje
+                                            </span>
+                                            <button
+                                                onClick={() => { setEditingMessage(null); setInputValue(''); }}
+                                                style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                                            >
+                                                <X size={16} />
+                                            </button>
+                                        </div>
+                                    )}
                                     <input
                                         type="text"
                                         value={inputValue}
                                         onChange={(e) => setInputValue(e.target.value)}
-                                        onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-                                        placeholder="Escribe tu mensaje aquí..."
+                                        onKeyPress={(e) => {
+                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                if (editingMessage) {
+                                                    handleSaveEdit();
+                                                } else {
+                                                    handleSend();
+                                                }
+                                            }
+                                        }}
+                                        placeholder={editingMessage ? "Edita tu mensaje..." : "Escribe tu mensaje aquí..."}
                                         style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text-title)', outline: 'none', padding: '10px 0', fontSize: '14.5px' }}
                                     />
                                     {/* Botón Micrófono o Enviar */}
-                                    {inputValue.trim() ? (
+                                    {inputValue.trim() || editingMessage ? (
                                         <div
-                                            onClick={handleSend}
+                                            onClick={editingMessage ? handleSaveEdit : handleSend}
                                             style={{
                                                 width: '42px', height: '42px',
                                                 background: 'var(--primary-gradient)', borderRadius: '12px',
@@ -1644,16 +1976,32 @@ const Chats = ({ onAuthError }) => {
                     <div style={{
                         position: 'absolute', top: contextMenu.y, left: contextMenu.x,
                         background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
-                        borderRadius: '12px', padding: '8px', minWidth: '180px',
+                        borderRadius: '12px', padding: '8px', minWidth: '220px',
                         boxShadow: '0 20px 40px rgba(0,0,0,0.6)', backdropFilter: 'blur(10px)',
                         animation: 'fadeIn 0.15s ease-out'
                     }}>
+                        <div style={{ display: 'flex', gap: '4px', padding: '6px', marginBottom: '4px', borderBottom: '1px solid var(--border-subtle)' }}>
+                            {['❤️', '😂', '😮', '😢', '👍'].map(emoji => (
+                                <button
+                                    key={emoji}
+                                    onClick={() => { handleSendReaction(contextMenu.msg, emoji); setContextMenu(null); }}
+                                    style={{
+                                        background: 'transparent', border: 'none', fontSize: '18px',
+                                        cursor: 'pointer', padding: '4px', borderRadius: '6px',
+                                        transition: 'all 0.2s'
+                                    }}
+                                    className="hover:bg-white/10"
+                                >
+                                    {emoji}
+                                </button>
+                            ))}
+                        </div>
                         {[
                             { label: 'Responder', onClick: () => setReplyingTo(contextMenu.msg) },
-                            { label: 'Copiar', onClick: () => navigator.clipboard.writeText(contextMenu.msg.text) },
-                            { label: 'Reenviar', onClick: () => alert('Reenvío no disponible en demo') },
-                            { label: 'Eliminar para mí', onClick: () => alert('Eliminar no disponible en demo') },
-                            { label: 'Info del mensaje', onClick: () => alert('Info no disponible en demo') },
+                            ...(contextMenu.msg?.sender === 'bot' ? [{ label: 'Editar', onClick: () => handleEditMessage(contextMenu.msg) }] : []),
+                            { label: 'Copiar', onClick: () => navigator.clipboard.writeText(contextMenu.msg?.text || '') },
+                            { label: 'Eliminar para mí', onClick: () => handleDeleteMessage(contextMenu.msg, false) },
+                            ...(contextMenu.msg?.sender === 'bot' ? [{ label: 'Eliminar para todos', onClick: () => handleDeleteMessage(contextMenu.msg, true) }] : []),
                         ].map((item, i) => (
                             <div
                                 key={i}

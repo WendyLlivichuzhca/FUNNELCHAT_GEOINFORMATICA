@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Limpiar IndexedDB - FunnelChat</title>
+    <style>
+        body { font-family: Arial; padding: 50px; text-align: center; background: #1a1a1a; color: white; }
+        button { padding: 15px 30px; font-size: 16px; background: #10d9a0; border: none; border-radius: 8px; cursor: pointer; }
+        button:hover { background: #0ec08d; }
+        #status { margin-top: 20px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <h1>🧹 Limpiar IndexedDB</h1>
+    <p>Esto borrará toda la caché local de FunnelChat</p>
+    <button onclick="limpiarDB()">Limpiar y Recargar</button>
+    <div id="status"></div>
+
+    <script>
+        async function limpiarDB() {
+            const status = document.getElementById('status');
+            status.textContent = '⏳ Limpiando...';
+
+            try {
+                await indexedDB.deleteDatabase('FunnelChatDB');
+                status.textContent = '✅ ¡Listo! Recargando en 2 segundos...';
+                setTimeout(() => location.reload(), 2000);
+            } catch (e) {
+                status.textContent = '❌ Error: ' + e.message;
+            }
+        }
+    </script>
+</body>
+</html>

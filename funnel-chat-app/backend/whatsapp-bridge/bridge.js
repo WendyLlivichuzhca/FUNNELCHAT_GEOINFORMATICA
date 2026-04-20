@@ -18,6 +18,38 @@ const socket = io('http://127.0.0.1:8000', {
 
 const logger = pino({ level: 'info' });
 
+const SESSION_USER_ID = process.env.WHATSAPP_USER_ID ? Number(process.env.WHATSAPP_USER_ID) : null;
+const SESSION_DEVICE_ID = process.env.WHATSAPP_DEVICE_ID ? Number(process.env.WHATSAPP_DEVICE_ID) : null;
+const SESSION_KEY = SESSION_USER_ID && SESSION_DEVICE_ID ? `user_${SESSION_USER_ID}_device_${SESSION_DEVICE_ID}` : 'legacy';
+const DEFAULT_AUTH_PATH = path.join(__dirname, 'auth_info_baileys');
+const AUTH_PATH = process.env.WHATSAPP_AUTH_PATH || DEFAULT_AUTH_PATH;
+const AUTO_START_WHATSAPP = process.env.AUTO_START_WHATSAPP === 'true';
+
+function withSession(payload = {}) {
+    return {
+        ...payload,
+        user_id: SESSION_USER_ID,
+        device_id: SESSION_DEVICE_ID,
+        session_key: SESSION_KEY
+    };
+}
+
+function emitBackend(event, payload = {}) {
+    socket.emit(event, withSession(payload));
+}
+
+function matchesSession(data = {}) {
+    if (!SESSION_USER_ID && !SESSION_DEVICE_ID) {
+        return !data || (!data.user_id && !data.device_id);
+    }
+    if (!data || (!data.user_id && !data.device_id)) {
+        return false;
+    }
+    const userMatches = !data.user_id || Number(data.user_id) === SESSION_USER_ID;
+    const deviceMatches = !data.device_id || Number(data.device_id) === SESSION_DEVICE_ID;
+    return userMatches && deviceMatches;
+}
+
 let sock;
 let isStarted = false;
 let isClosing = false; // Nueva bandera para evitar bucles durante el cierre
@@ -28,7 +60,6 @@ const BASE_DELAY = 3000;
 const INITIAL_HISTORY_LIMIT = 80;
 const LOAD_MORE_HISTORY_LIMIT = 60;
 const PHOTO_SYNC_LIMIT = 300;
-const AUTH_PATH = path.join(__dirname, 'auth_info_baileys');
 
 const contactCache = new Map();
 const historyCache = new Map();
@@ -333,13 +364,13 @@ async function emitContactBatch(entries = []) {
     if (!entries.length) {
         return;
     }
-    socket.emit('whatsapp_contacts', { contacts: entries, is_batch: true });
+    emitBackend('whatsapp_contacts', { contacts: entries, is_batch: true });
 }
 
 async function emitChatHistory(jid, limit = null, options = {}) {
     const history = historyCache.get(jid) || [];
     const publicHistory = history.slice(limit ? -limit : undefined).map(toPublicMessage);
-    socket.emit('whatsapp_chat_history', {
+    emitBackend('whatsapp_chat_history', {
         contact_id: jid,
         whatsapp_id: jid,
         history: publicHistory,
@@ -357,7 +388,7 @@ async function syncProfilePhotos(jids = []) {
             if (ppUrl) {
                 const existing = contactCache.get(jid) || {};
                 contactCache.set(jid, { ...existing, photo_url: ppUrl });
-                socket.emit('contact_photo', { whatsapp_id: jid, photo_url: ppUrl });
+                emitBackend('contact_photo', { whatsapp_id: jid, photo_url: ppUrl });
             }
         } catch (e) {
             // Sin foto o no disponible.
@@ -408,6 +439,7 @@ async function startSock() {
     }
     isStarted = true;
 
+    console.log(`>>> [BAILEYS] INICIANDO SESION ${SESSION_KEY} EN ${AUTH_PATH}`);
     loadPersistedLidMappings();
 
     const authPath = AUTH_PATH;
@@ -426,7 +458,7 @@ async function startSock() {
         sock = null;
     }
 
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+    const { state, saveCreds } = await useMultiFileAuthState(authPath);
 
     console.log('>>> [BAILEYS] VERIFICANDO VERSIÓN DE WHATSAPP...');
     let version;
@@ -463,7 +495,7 @@ async function startSock() {
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
-        if (qr) socket.emit('whatsapp_qr_ready', { qr: qr });
+        if (qr) emitBackend('whatsapp_qr_ready', { qr: qr });
 
         if (connection === 'close') {
             const errorCode = lastDisconnect.error?.output?.statusCode;
@@ -471,7 +503,7 @@ async function startSock() {
 
             if (errorCode === DisconnectReason.loggedOut || isClosing) {
                 console.log('>>> [BAILEYS] SESIÓN CERRADA/EXPIRADA. LIMPIANDO...');
-                socket.emit('whatsapp_status', { status: 'session_expired' });
+                emitBackend('whatsapp_status', { status: 'session_expired' });
 
                 // Borrar carpeta de sesión y reiniciar
                 if (fs.existsSync(authPath)) {
@@ -483,7 +515,7 @@ async function startSock() {
                 setTimeout(startSock, 1000);
             } else if (errorCode === DisconnectReason.connectionReplaced) {
                 console.log('>>> [BAILEYS] SESIÓN ABIERTA EN OTRO LUGAR (CONFLICTO). ESPERANDO 10s...');
-                socket.emit('whatsapp_status', { status: 'conflict' });
+                emitBackend('whatsapp_status', { status: 'conflict' });
                 setTimeout(startSock, 10000);
             } else if (retryCount < MAX_TOTAL_RETRIES) {
                 retryCount++;
@@ -494,24 +526,24 @@ async function startSock() {
                 setTimeout(startSock, Math.min(BASE_DELAY * Math.pow(2, retryCount - 1), 60000));
             } else {
                 console.error('>>> [BAILEYS] ERROR CRÍTICO: MÁXIMO DE REINTENTOS ALCANZADO.');
-                socket.emit('whatsapp_status', { status: 'error' });
+                emitBackend('whatsapp_status', { status: 'error' });
             }
         } else if (connection === 'open') {
             retryCount = 0;
             isClosing = false;
             const phone = sock.user?.id?.split(':')[0] || sock.user?.id?.split('@')[0];
             console.log(`>>> ✅ BAILEYS CONECTADO: ${phone}`);
-            socket.emit('whatsapp_status', {
+            emitBackend('whatsapp_status', {
                 status: 'conectado',
                 phone: phone
             });
-            setTimeout(() => socket.emit('whatsapp_ready_for_sync'), 2000);
+            setTimeout(() => emitBackend('whatsapp_ready_for_sync'), 2000);
         }
     });
 
     sock.ev.on('messaging-history.set', async ({ chats, contacts, messages }) => {
         console.log(`>>> [BAILEYS] RECIBIDO HISTORIAL: ${chats.length} CHATS.`);
-        socket.emit('sync_progress', { progress: 10, message: 'Vinculando chats...' });
+        emitBackend('sync_progress', { progress: 10, message: 'Vinculando chats...' });
 
         const contactLookup = new Map();
         const messagesByJid = new Map();
@@ -686,7 +718,7 @@ async function startSock() {
             await emitContactBatch(contactsBatch);
         }
 
-        socket.emit('sync_progress', { progress: 100, message: 'Finalizado' });
+        emitBackend('sync_progress', { progress: 100, message: 'Finalizado' });
 
         setTimeout(async () => {
             console.log('>>> [BAILEYS] 📸 Obteniendo fotos de perfil...');
@@ -747,7 +779,7 @@ async function startSock() {
                         pendingHistoryRequests.delete(jid);
                     }
 
-                    socket.emit('whatsapp_message', {
+                    emitBackend('whatsapp_message', {
                         id: msg.key.id, contact_id: jid, whatsapp_id: jid, text,
                         sender: msg.key.fromMe ? 'bot' : 'user', timestamp: msg.messageTimestamp,
                         fromMe: msg.key.fromMe, status: msg.status || 1,
@@ -882,11 +914,62 @@ async function startSock() {
         await emitContactBatch([updated]);
     });
 
-    sock.ev.on('message-receipt.update', (receipts) => {
-        socket.emit('whatsapp_receipt', receipts);
+sock.ev.on('message-receipt.update', (receipts) => {
+        emitBackend('whatsapp_receipt', { receipts });
+    });
+
+    sock.ev.on('messages.reaction', async (reactions) => {
+        if (!reactions || !reactions.length) return;
+        
+        for (const reaction of reactions) {
+            const { key, reaction } = reaction;
+            if (!key || !reaction) continue;
+            
+            const jid = key.remoteJid;
+            const messageId = key.id;
+            const emoji = reaction.text || '';
+            const sender = key.fromMe ? 'bot' : (reaction.sender || 'user');
+            
+            console.log(`>>> [BAILEYS] REACCIÓN: ${emoji} de ${sender} en ${messageId}`);
+            
+            emitBackend('whatsapp_reaction', {
+                jid,
+                message_id: messageId,
+                emoji,
+                sender,
+                timestamp: Date.now() / 1000
+            });
+        }
+    });
+
+    // Manejar mensajes editados
+    sock.ev.on('messages.update', async (messages) => {
+        for (const msg of messages) {
+            const jid = msg.key?.remoteJid;
+            const messageId = msg.key?.id;
+            
+            if (msg.update?.edited) {
+                console.log(`>>> [BAILEYS] MENSAJE EDITADO: ${messageId}`);
+                emitBackend('message_edited', {
+                    jid,
+                    message_id: messageId,
+                    new_text: msg.update.edited
+                });
+            }
+            
+            if (msg.update?.message && msg.update.message.protocolMessage?.type === 'REVOKE') {
+                const revokedId = msg.update.protocolMessage.key.id;
+                console.log(`>>> [BAILEYS] MENSAJE ELIMINADO: ${revokedId}`);
+                emitBackend('message_deleted', {
+                    jid,
+                    message_id: revokedId
+                });
+            }
+        }
     });
 
     socket.on('send_whatsapp_message', async (data) => {
+        if (!matchesSession(data)) return;
         const { to, text, quotedMsg } = data;
         try {
             const msgContent = { text: text };
@@ -902,6 +985,7 @@ async function startSock() {
 
     // Enviar archivos multimedia (imagen, video, audio, documento)
     socket.on('send_whatsapp_media', async (data) => {
+        if (!matchesSession(data)) return;
         const { to, mediaType, base64Data, fileName, caption, mimeType } = data;
         try {
             const buffer = Buffer.from(base64Data, 'base64');
@@ -930,14 +1014,15 @@ async function startSock() {
 
             const sent = await sock.sendMessage(to, msgContent);
             console.log(`>>> [BAILEYS] ✅ MEDIA ENVIADA a ${to}: ${mediaType} (${fileName})`);
-            socket.emit('media_sent', { success: true, to, mediaType, messageId: sent?.key?.id });
+            emitBackend('media_sent', { success: true, to, mediaType, messageId: sent?.key?.id });
         } catch (e) {
             console.error('>>> [BAILEYS] ERROR ENVIANDO MEDIA:', e.message);
-            socket.emit('media_sent', { success: false, error: e.message });
+            emitBackend('media_sent', { success: false, error: e.message });
         }
     });
 
     socket.on('mark_as_read', async (data) => {
+        if (!matchesSession(data)) return;
         const { whatsapp_id, message_id } = data;
         try {
             await sock.readMessages([{ remoteJid: whatsapp_id, id: message_id, fromMe: false }]);
@@ -957,19 +1042,19 @@ async function startSock() {
             const isTyping = state === 'composing' || state === 'recording';
             const isOnline = state === 'available';
 
-            socket.emit('presence_update', {
+            emitBackend('presence_update', {
                 whatsapp_id: jid,
                 status: state,
                 lastSeen: presence.lastSeen || null,
                 isOnline
             });
 
-            socket.emit('user_typing', { whatsapp_id: jid, is_typing: isTyping });
+            emitBackend('user_typing', { whatsapp_id: jid, is_typing: isTyping });
 
             // Auto-limpiar typing después de 4 segundos si no llega otro update
             if (isTyping) {
                 setTimeout(() => {
-                    socket.emit('user_typing', { whatsapp_id: jid, is_typing: false });
+                    emitBackend('user_typing', { whatsapp_id: jid, is_typing: false });
                 }, 4000);
             }
         });
@@ -977,6 +1062,7 @@ async function startSock() {
 
     // Suscribirse a la presencia de un contacto cuando se abre su chat
     socket.on('subscribe_presence', async (data) => {
+        if (!matchesSession(data)) return;
         const { whatsapp_id } = data;
         try {
             await sock.presenceSubscribe(whatsapp_id);
@@ -986,12 +1072,13 @@ async function startSock() {
         }
     });
 
-    socket.on('request_contacts_sync', async () => {
+    socket.on('request_contacts_sync', async (data = {}) => {
+        if (!matchesSession(data)) return;
         const contacts = Array.from(contactCache.values())
             .sort((a, b) => normalizeTimestamp(b.timestamp) - normalizeTimestamp(a.timestamp));
 
         if (contacts.length > 0) {
-            socket.emit('whatsapp_contacts', {
+            emitBackend('whatsapp_contacts', {
                 contacts: contacts.map((contact, index) => ({
                     ...contact,
                     batch_index: index,
@@ -1006,6 +1093,7 @@ async function startSock() {
     });
 
     socket.on('request_chat_history', async (data) => {
+        if (!matchesSession(data)) return;
         const jid = data?.whatsapp_id || data?.contact_id;
         if (!jid) {
             return;
@@ -1040,16 +1128,18 @@ async function startSock() {
     });
 
     // Estado actual de WhatsApp (para el frontend al reconectarse)
-    socket.on('request_whatsapp_status', async () => {
+    socket.on('request_whatsapp_status', async (data = {}) => {
+        if (!matchesSession(data)) return;
         const phone = sock?.user?.id?.split(':')[0] || sock?.user?.id?.split('@')[0];
         if (phone) {
-            socket.emit('whatsapp_status', { status: 'conectado', phone });
+            emitBackend('whatsapp_status', { status: 'conectado', phone });
         } else {
-            socket.emit('whatsapp_status', { status: 'desconectado' });
+            emitBackend('whatsapp_status', { status: 'desconectado' });
         }
     });
 
-    socket.on('whatsapp_logout', async () => {
+    socket.on('whatsapp_logout', async (data = {}) => {
+        if (!matchesSession(data)) return;
         console.log('>>> [BAILEYS] PETICIÓN DE LOGOUT RECIBIDA.');
         isClosing = true;
         try {
@@ -1057,11 +1147,223 @@ async function startSock() {
         } catch (e) {
             // Si falla el logout (ej. ya cerrado), forzamos reinicio
             isStarted = false;
-            const authPath = path.join(__dirname, 'auth_info_baileys');
+            const authPath = AUTH_PATH;
             if (fs.existsSync(authPath)) fs.rmSync(authPath, { recursive: true, force: true });
             setTimeout(startSock, 1000);
         }
     });
+
+    // ============================================================
+    // MANEJO DE ESTADOS (STORIES)
+    // ============================================================
+    sock.ev.on('statuses.upsert', async (statuses) => {
+        if (!statuses || !statuses.length) return;
+        
+        const statusData = statuses.map(s => ({
+            id: s.id,
+            userJid: s.userJid,
+            mediaUrl: s.url || null,
+            mediaType: s.type || 'text',
+            caption: s.caption || '',
+            viewCount: s.viewCount || 0,
+            viewers: s.viewers || [],
+            timestamp: s.timestamp || Date.now() / 1000,
+            expiresAt: s.expireAt || null
+        }));
+        
+        console.log(`>>> [BAILEYS] RECIBIDOS ${statusData.length} ESTADOS`);
+        emitBackend('statuses_update', { statuses: statusData });
+    });
+
+    // ============================================================
+    // EDICIÓN DE MENSAJES
+    // ============================================================
+    socket.on('edit_message', async (data) => {
+        if (!matchesSession(data)) return;
+        const { message_id, new_text } = data;
+        try {
+            const key = { id: message_id, remoteJid: null, fromMe: true };
+            await sock.sendMessage(key.remoteJid, { text: new_text }, { edit: key });
+            console.log(`>>> [BAILEYS] MENSAJE EDITADO: ${message_id}`);
+            emitBackend('message_edited', { message_id, new_text });
+        } catch (e) {
+            console.error('>>> [BAILEYS] ERROR EDITANDO MENSAJE:', e.message);
+            emitBackend('message_edit_error', { message_id, error: e.message });
+        }
+    });
+
+    // Eliminar mensaje para mí o para todos
+    socket.on('delete_message', async (data) => {
+        if (!matchesSession(data)) return;
+        const { message_id, jid, delete_for_everyone } = data;
+        try {
+            const key = { id: message_id, remoteJid: jid };
+            await sock.chatModify({ delete: key }, jid, {
+                deleteAudience: delete_for_everyone ? 'all' : 'me'
+            });
+            console.log(`>>> [BAILEYS] MENSAJE ELIMINADO: ${message_id} (everyone: ${delete_for_everyone})`);
+            emitBackend('message_deleted', { message_id, jid, for_everyone: delete_for_everyone });
+        } catch (e) {
+            console.error('>>> [BAILEYS] ERROR ELIMINANDO MENSAJE:', e.message);
+            emitBackend('message_delete_error', { message_id, error: e.message });
+        }
+    });
+
+    // Enviar reacción a un mensaje
+    socket.on('send_reaction', async (data) => {
+        if (!matchesSession(data)) return;
+        const { jid, message_id, reaction } = data;
+        try {
+            const key = { id: message_id, remoteJid: jid };
+            await sock.sendMessage(jid, {
+                react: { text: reaction, key: key }
+            });
+            console.log(`>>> [BAILEYS] REACCIÓN ENVIADA: ${reaction} a ${message_id}`);
+            emitBackend('reaction_sent', { message_id, reaction, jid });
+        } catch (e) {
+            console.error('>>> [BAILEYS] ERROR ENVIANDO REACCIÓN:', e.message);
+            emitBackend('reaction_error', { message_id, error: e.message });
+        }
+    });
+
+    // Marcar mensajes como leído/no leído
+    socket.on('mark_messages', async (data) => {
+        if (!matchesSession(data)) return;
+        const { jid, message_ids } = data;
+        try {
+            for (const msgId of message_ids) {
+                await sock.readMessages([{ remoteJid: jid, id: msgId, fromMe: false }]);
+            }
+            console.log(`>>> [BAILEYS] MARCADOS ${message_ids.length} MENSAJES COMO LEÍDOS`);
+            emitBackend('messages_marked_read', { jid, count: message_ids.length });
+        } catch (e) {
+            console.error('>>> [BAILEYS] ERROR MARCANDO MENSAJES:', e.message);
+        }
+    });
+
+    // Obtener estados (stories)
+    socket.on('request_status_list', async (data = {}) => {
+        if (!matchesSession(data)) return;
+        try {
+            const status = await sock.getStatuses();
+            emitBackend('status_list', { statuses: status || [] });
+        } catch (e) {
+            console.error('>>> [BAILEYS] ERROR OBTENIENDO ESTADOS:', e.message);
+            emitBackend('status_list', { statuses: [] });
+        }
+    });
+
+    // Publicar estado (story)
+    socket.on('post_status', async (data) => {
+        if (!matchesSession(data)) return;
+        const { mediaType, mediaBase64, caption, backgroundColor } = data;
+        try {
+            let content = {};
+            if (mediaType === 'image' && mediaBase64) {
+                content.image = Buffer.from(mediaBase64, 'base64');
+            } else if (mediaType === 'video' && mediaBase64) {
+                content.video = Buffer.from(mediaBase64, 'base64');
+            } else if (backgroundColor) {
+                content.text = { text: caption || '' };
+            }
+
+            const sent = await sock.sendMessage('status@broadcast', content);
+            console.log(`>>> [BAILEYS] ESTADO PUBLICADO`);
+            emitBackend('status_posted', { success: true, id: sent?.key?.id });
+        } catch (e) {
+            console.error('>>> [BAILEYS] ERROR PUBLICANDO ESTADO:', e.message);
+            emitBackend('status_posted', { success: false, error: e.message });
+        }
+    });
+
+    // Obtener información de un contacto
+    socket.on('get_contact_info', async (data) => {
+        if (!matchesSession(data)) return;
+        const { jid } = data;
+        try {
+            const info = await sock.onWhatsApp(jid);
+            emitBackend('contact_info', { jid, exists: info?.exists });
+        } catch (e) {
+            emitBackend('contact_info', { jid, exists: false, error: e.message });
+        }
+    });
+
+    // Crear grupo
+    socket.on('create_group', async (data) => {
+        if (!matchesSession(data)) return;
+        const { subject, participants } = data;
+        try {
+            const groupJid = await sock.groupCreate(subject, participants);
+            console.log(`>>> [BAILEYS] GRUPO CREADO: ${subject}`);
+            emitBackend('group_created', { jid: groupJid });
+        } catch (e) {
+            console.error('>>> [BAILEYS] ERROR CREANDO GRUPO:', e.message);
+            emitBackend('group_create_error', { error: e.message });
+        }
+    });
+
+    // Agregar participantes a grupo
+    socket.on('add_group_participants', async (data) => {
+        if (!matchesSession(data)) return;
+        const { jid, participants } = data;
+        try {
+            await sock.groupAdd(jid, participants);
+            emitBackend('participants_added', { jid, count: participants.length });
+        } catch (e) {
+            console.error('>>> [BAILEYS] ERROR AGREGANDO PARTICIPANTES:', e.message);
+        }
+    });
+
+    // Remover participantes de grupo
+    socket.on('remove_group_participants', async (data) => {
+        if (!matchesSession(data)) return;
+        const { jid, participants } = data;
+        try {
+            await sock.groupRemove(jid, participants);
+            emitBackend('participants_removed', { jid, count: participants.length });
+        } catch (e) {
+            console.error('>>> [BAILEYS] ERROR REMOVIENDO PARTICIPANTES:', e.message);
+        }
+    });
+
+    // Promover/d degradar admin
+    socket.on('set_group_admin', async (data) => {
+        if (!matchesSession(data)) return;
+        const { jid, participant, action } = data;
+        try {
+            if (action === 'promote') {
+                await sock.groupMakeAdmin(jid, participant);
+            } else if (action === 'demote') {
+                await sock.groupDemoteAdmin(jid, participant);
+            }
+            emitBackend('admin_set', { jid, participant, action });
+        } catch (e) {
+            console.error('>>> [BAILEYS] ERROR CONFIGURANDO ADMIN:', e.message);
+        }
+    });
+
+    // Salir del grupo
+    socket.on('leave_group', async (data) => {
+        if (!matchesSession(data)) return;
+        const { jid } = data;
+        try {
+            await sock.groupLeave(jid);
+            emitBackend('left_group', { jid });
+        } catch (e) {
+            console.error('>>> [BAILEYS] ERROR SALIENDO DEL GRUPO:', e.message);
+        }
+    });
 }
 
-socket.on('connect', () => { startSock(); });
+socket.on('start_whatsapp_session', async (data = {}) => {
+    if (!matchesSession(data)) return;
+    await startSock();
+});
+
+socket.on('connect', () => {
+    if (AUTO_START_WHATSAPP) {
+        startSock();
+    } else {
+        console.log(`>>> [BAILEYS] PUENTE ${SESSION_KEY} CONECTADO. Esperando start_whatsapp_session.`);
+    }
+});

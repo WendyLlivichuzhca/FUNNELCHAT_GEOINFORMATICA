@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Send, Users, MessageSquare, Calendar, TrendingUp, Plus, Clock, CheckCircle, BarChart2 } from 'lucide-react';
+import { Send, Users, MessageSquare, Calendar, TrendingUp, Plus, Clock, CheckCircle, BarChart2, AlertCircle } from 'lucide-react';
 
 const Difusion = () => {
     const [campaigns, setCampaigns] = useState([]);
@@ -7,12 +7,27 @@ const Difusion = () => {
     const [showCreate, setShowCreate] = useState(false);
     const [newCampaign, setNewCampaign] = useState({ nombre: '', mensaje: '', segmento: 'Todos' });
     const [isSending, setIsSending] = useState(false);
+    const [toast, setToast] = useState(null);
+
+    const showToast = (msg, type = 'success') => {
+        setToast({ msg, type });
+        setTimeout(() => setToast(null), 3000);
+    };
 
     useEffect(() => {
         fetch('http://localhost:8000/api/campaigns')
             .then(res => res.json())
-            .then(data => setCampaigns(data))
-            .catch(err => console.error("Error fetching campaigns:", err));
+            .then(data => {
+                // Asegurar que siempre sea array
+                const campaignsArray = Array.isArray(data) ? data : [];
+                setCampaigns(campaignsArray);
+                setIsLoading(false);
+            })
+            .catch(err => {
+                console.error("Error fetching campaigns:", err);
+                setCampaigns([]);
+                setIsLoading(false);
+            });
     }, []);
 
     const handleCreateCampaign = async () => {
@@ -46,8 +61,12 @@ const Difusion = () => {
         }, 2000);
     };
 
-    const totalEnviados = campaigns.reduce((s, c) => s + (c.total_enviados || 0), 0);
-    const completadas = campaigns.filter(c => c.estado === 'completado').length;
+    const totalEnviados = Array.isArray(campaigns) 
+    ? campaigns.reduce((s, c) => s + (c.total_enviados || 0), 0) 
+    : 0;
+    const completadas = Array.isArray(campaigns) 
+    ? campaigns.filter(c => c.estado === 'completado').length 
+    : 0;
 
     return (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>

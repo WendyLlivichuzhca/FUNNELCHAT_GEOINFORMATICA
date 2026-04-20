@@ -402,7 +402,61 @@ import subprocess
 import os
 from contextlib import asynccontextmanager
 
-bridge_process = None
+bridge_process = None  # Proceso legacy/idle que se conserva por compatibilidad.
+bridge_processes = {}  # device_id -> subprocess.Popen
+
+def bridge_runtime_paths(user_id: int, device_id: int):
+    bridge_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whatsapp-bridge")
+    sessions_dir = os.path.join(bridge_dir, "sessions", f"user_{user_id}", f"device_{device_id}")
+    return bridge_dir, sessions_dir
+
+def start_bridge_for_device(user_id: int, device_id: int):
+    existing = bridge_processes.get(device_id)
+    if existing and existing.poll() is None:
+        return existing
+
+    bridge_dir, auth_path = bridge_runtime_paths(user_id, device_id)
+    use_mock = os.getenv("USE_MOCK_BRIDGE", "false").lower() == "true"
+    script_name = "mock_bridge.js" if use_mock else "bridge.js"
+    bridge_script = os.path.join(bridge_dir, script_name)
+    os.makedirs(auth_path, exist_ok=True)
+
+    env = os.environ.copy()
+    env["WHATSAPP_USER_ID"] = str(user_id)
+    env["WHATSAPP_DEVICE_ID"] = str(device_id)
+    env["WHATSAPP_AUTH_PATH"] = auth_path
+    env["AUTO_START_WHATSAPP"] = "true"
+
+    print(f">>> [BRIDGE] Iniciando puente WhatsApp para user_id={user_id}, device_id={device_id}")
+    process = subprocess.Popen(["node", bridge_script], cwd=bridge_dir, env=env)
+    bridge_processes[device_id] = process
+    return process
+
+def stop_bridge_for_device(device_id: int):
+    process = bridge_processes.pop(device_id, None)
+    if not process or process.poll() is not None:
+        return
+    print(f">>> [BRIDGE] Deteniendo puente WhatsApp device_id={device_id}")
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+
+def stop_all_bridge_processes():
+    for device_id in list(bridge_processes.keys()):
+        stop_bridge_for_device(device_id)
+
+def start_persisted_bridge_processes():
+    db = SessionLocal()
+    try:
+        devices = db.query(Device).filter(Device.estado.in_(["conectado", "conectando"])).all()
+        for device in devices:
+            start_bridge_for_device(device.usuario_id, device.id)
+    except Exception as e:
+        print(f">>> [BRIDGE] No se pudieron restaurar puentes persistidos: {e}")
+    finally:
+        db.close()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -430,6 +484,9 @@ async def lifespan(app: FastAPI):
     # Restaurar datos persistidos de sesiones anteriores
     print(">>> [DB] Cargando datos persistidos de MySQL (XAMPP)...")
     db_load_all()
+    print(">>> [BRIDGE] Los puentes WhatsApp por usuario/dispositivo se restauran bajo demanda.")
+    if os.getenv("AUTO_RESTORE_WHATSAPP_BRIDGES", "true").lower() == "true":
+        start_persisted_bridge_processes()
 
     yield
     
@@ -441,6 +498,7 @@ async def lifespan(app: FastAPI):
         except subprocess.TimeoutExpired:
             bridge_process.kill()
         print("Puente de WhatsApp detenido.")
+    stop_all_bridge_processes()
 
 # Inicialización de FastAPI
 app = FastAPI(title="Funnel Chat API", lifespan=lifespan)
@@ -482,14 +540,25 @@ async def root():
     return {"message": "Funnel Chat API is running", "status": "online"}
 
 @app.get("/api/stats")
-async def get_stats():
-    campaigns_count = len(campaigns_db)
-    total_contacts = sum(len(v) for v in contacts_mock_db.values())
+async def get_stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    user_id = current_user.id
+    contacts = contacts_mock_db.get(user_id, [])
+    if not contacts:
+        contacts = hydrate_user_contacts_from_db(user_id)
+
+    total_contacts = len([c for c in contacts if c.get("whatsapp_id")])
+    conversations_count = len([
+        c for c in contacts
+        if c.get("whatsapp_id") and (c.get("last_message") or c.get("timestamp"))
+    ])
+    campaigns_count = db.query(CampanaDB).filter(CampanaDB.usuario_id == user_id).count()
+    automations_count = db.query(AutomatizacionDB).filter(AutomatizacionDB.usuario_id == user_id).count()
     return {
-        "leads": total_contacts or 387,
-        "conversations": 42,
-        "conversion_rate": "18.5%",
-        "automations": campaigns_count + 12
+        "leads": total_contacts,
+        "conversations": conversations_count,
+        "conversion_rate": "0%" if total_contacts == 0 else f"{round((conversations_count / total_contacts) * 100, 1)}%",
+        "automations": automations_count,
+        "campaigns": campaigns_count,
     }
 
 # ============================================================
@@ -544,15 +613,107 @@ def contact_matches_identity(contact: dict, jid: str, phone: str = None) -> bool
         return False
     return normalize_phone_value(contact.get("phone")) == normalize_phone_value(phone)
 
-def db_upsert_contact(user_id: int, contact: dict):
+def safe_int(value):
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+def get_whatsapp_event_device_id(data: dict = None):
+    if data:
+        device_id = safe_int(data.get("device_id"))
+        if device_id:
+            return device_id
+    return active_qr_device_id
+
+def get_whatsapp_event_user_ids(data: dict = None):
+    if data:
+        user_id = safe_int(data.get("user_id"))
+        if user_id:
+            return [user_id]
+        device_id = safe_int(data.get("device_id"))
+        if device_id and device_id in connected_whatsapp_sessions:
+            return [connected_whatsapp_sessions[device_id]]
+        if device_id and device_id in qr_sessions:
+            return [qr_sessions[device_id]]
+    if connected_whatsapp_user_id:
+        return [connected_whatsapp_user_id]
+    if active_qr_user_id:
+        return [active_qr_user_id]
+    if len(set(connected_whatsapp_sessions.values())) == 1:
+        return list(set(connected_whatsapp_sessions.values()))
+    return []
+
+def get_user_contacts_from_cache_or_db(user_id: int):
+    contacts = contacts_mock_db.get(user_id, [])
+    if not contacts:
+        contacts = hydrate_user_contacts_from_db(user_id)
+    return contacts or []
+
+def find_user_contact(user_id: int, contact_id_or_jid):
+    value = str(contact_id_or_jid)
+    contacts = get_user_contacts_from_cache_or_db(user_id)
+    contact = next((c for c in contacts if str(c.get("id")) == value), None)
+    if not contact and "@" in value:
+        contact = next((c for c in contacts if str(c.get("whatsapp_id")) == value), None)
+    return contact
+
+def require_user_contact(user_id: int, contact_id_or_jid, group_only: bool = False):
+    contact = find_user_contact(user_id, contact_id_or_jid)
+    if not contact:
+        raise HTTPException(status_code=404, detail="Chat no encontrado para este usuario")
+    if group_only and "@g.us" not in str(contact.get("whatsapp_id", "")):
+        raise HTTPException(status_code=400, detail="El chat no es un grupo de este usuario")
+    return contact
+
+def ensure_active_whatsapp_belongs_to_user(user_id: int, device_id: int = None):
+    if device_id and connected_whatsapp_sessions.get(device_id) == user_id:
+        return
+    if user_id in connected_whatsapp_sessions.values() or active_qr_user_id == user_id:
+        return
+    owner_ids = get_whatsapp_event_user_ids({"device_id": device_id} if device_id else None)
+    if not owner_ids:
+        raise HTTPException(status_code=409, detail="No hay una sesion de WhatsApp activa para sincronizar")
+    if user_id not in owner_ids:
+        raise HTTPException(status_code=403, detail="La sesion de WhatsApp activa pertenece a otro usuario")
+
+def get_active_device_id_for_user(user_id: int):
+    for device_id, owner_id in connected_whatsapp_sessions.items():
+        if owner_id == user_id:
+            return device_id
+    if active_qr_user_id == user_id and active_qr_device_id:
+        return active_qr_device_id
+    db = SessionLocal()
+    try:
+        device = db.query(Device).filter(
+            Device.usuario_id == user_id,
+            Device.estado.in_(["conectado", "conectando"])
+        ).order_by(Device.conectado_en.desc()).first()
+        return device.id if device else None
+    finally:
+        db.close()
+
+def get_chat_history_for_user(user_id: int, jid: str):
+    return [
+        msg for msg in chat_histories.get(jid, [])
+        if msg.get("owner_user_id") in (None, user_id)
+    ]
+
+def db_upsert_contact(user_id: int, contact: dict, device_id: int = None):
     """Guarda o actualiza un contacto en la tabla 'contactos' de MySQL."""
     db = SessionLocal()
     try:
         wid = contact.get("whatsapp_id")
         if not wid:
             return
-        # Buscar el dispositivo del usuario
-        device = db.query(Device).filter(Device.usuario_id == user_id).first()
+        # Buscar el dispositivo exacto cuando el evento viene de una sesion Baileys concreta.
+        if not device_id:
+            device_id = contact.get("device_id")
+        device = None
+        if device_id:
+            device = db.query(Device).filter(Device.id == device_id, Device.usuario_id == user_id).first()
+        if not device:
+            device = db.query(Device).filter(Device.usuario_id == user_id).first()
         if not device:
             return
         phone = contact.get("phone") or wid.split("@")[0]
@@ -611,14 +772,16 @@ def db_upsert_contact(user_id: int, contact: dict):
     finally:
         db.close()
 
-def db_save_message(jid: str, user_id_val: int, message: dict):
+def db_save_message(jid: str, user_id_val: int, message: dict, device_id: int = None):
     """Guarda un mensaje en la tabla 'mensajes' de MySQL."""
     db = SessionLocal()
     try:
         # Buscar el dispositivo del usuario
         device = None
+        if device_id and user_id_val:
+            device = db.query(Device).filter(Device.id == device_id, Device.usuario_id == user_id_val).first()
         if user_id_val:
-            device = db.query(Device).filter(Device.usuario_id == user_id_val).first()
+            device = device or db.query(Device).filter(Device.usuario_id == user_id_val).first()
         if not device:
             device = db.query(Device).filter(Device.estado == "conectado").first()
         if not device:
@@ -703,6 +866,7 @@ def db_load_all():
                     )
                     contact = {
                         "id": row.id,
+                        "device_id": row.dispositivo_id,
                         "whatsapp_id": row.jid,
                         "name": resolve_contact_name({
                             "name": row.nombre,
@@ -762,8 +926,12 @@ def db_load_all():
                 jid = row.chat_jid
                 if jid not in chat_histories:
                     chat_histories[jid] = []
-                # Evitar duplicados por mensaje_id
-                existing_ids = {m.get("id") for m in chat_histories[jid]}
+                owner_user_id = device_user_map.get(row.dispositivo_id)
+                # Evitar duplicados por mensaje_id dentro del mismo usuario/dispositivo.
+                existing_ids = {
+                    (m.get("id"), m.get("owner_user_id"))
+                    for m in chat_histories[jid]
+                }
                 msg = {
                     "id": row.mensaje_id or str(row.id),
                     "text": row.texto,
@@ -775,17 +943,19 @@ def db_load_all():
                     "participant": row.participant_jid,
                     "pushName": row.push_name,
                     "status": row.estado,
+                    "device_id": row.dispositivo_id,
+                    "owner_user_id": owner_user_id,
                 }
-                if msg["id"] not in existing_ids:
+                if (msg["id"], msg["owner_user_id"]) not in existing_ids:
                     chat_histories[jid].append(msg)
                     count_m += 1
             except Exception:
                 pass
 
-        for contacts_list in contacts_mock_db.values():
+        for uid, contacts_list in contacts_mock_db.items():
             for contact in contacts_list:
                 jid = contact.get("whatsapp_id")
-                history = chat_histories.get(jid, [])
+                history = get_chat_history_for_user(uid, jid)
                 if not history:
                     continue
                 last_msg = history[-1]
@@ -827,6 +997,10 @@ def hydrate_user_contacts_from_db(user_id: int):
 
         rows = db.query(ContactDB).filter(ContactDB.dispositivo_id.in_(device_ids)).all()
         for row in rows:
+            # FILTRO: Solo contactos con JID válido de WhatsApp (contiene @)
+            if not row.jid or '@' not in str(row.jid):
+                continue
+                
             existing = contacts_map.get(row.jid)
             restored_timestamp = (
                 normalize_timestamp(row.last_timestamp) or
@@ -834,6 +1008,7 @@ def hydrate_user_contacts_from_db(user_id: int):
             )
             payload = {
                 "id": row.id,
+                "device_id": row.dispositivo_id,
                 "whatsapp_id": row.jid,
                 "name": resolve_contact_name({
                     "name": row.nombre,
@@ -851,6 +1026,7 @@ def hydrate_user_contacts_from_db(user_id: int):
                 "last_message": row.ultimo_mensaje or "",
                 "unread_count": row.mensajes_sin_leer or 0,
                 "is_group": "@g.us" in (row.jid or ""),
+                "is_user": True,  # Si tiene JID válido, es usuario de WhatsApp
                 "timestamp": restored_timestamp,
                 "participants": parse_participants(row.participants_json),
                 "mediaType": row.last_media_type,
@@ -859,7 +1035,7 @@ def hydrate_user_contacts_from_db(user_id: int):
                 "status": row.estado_lead or (existing.get("status") if existing else "nuevo") or "nuevo",
             }
 
-            history = chat_histories.get(row.jid, [])
+            history = get_chat_history_for_user(user_id, row.jid)
             if history:
                 last_msg = history[-1]
                 payload["timestamp"] = normalize_timestamp(last_msg.get("timestamp")) or payload["timestamp"]
@@ -889,6 +1065,9 @@ def hydrate_user_contacts_from_db(user_id: int):
 contacts_mock_db = {}  # user_id -> list of contacts
 qr_sessions = {}  # device_id -> user_id
 active_qr_user_id = None
+active_qr_device_id = None
+connected_whatsapp_user_id = None
+connected_whatsapp_sessions = {}  # device_id -> user_id
 
 # ============================================================
 # HELPER: Resolver nombre de contacto con prioridad correcta
@@ -938,15 +1117,20 @@ def get_message_preview(msg_data: dict) -> str:
     }
     return previews.get(media_type, "💬 Mensaje")
 
-async def request_bridge_history_refresh(wid: str, local_history: list, mode: str = "latest", count: int = 60):
-    await sio.emit('request_chat_history', {
+async def request_bridge_history_refresh(wid: str, local_history: list, mode: str = "latest", count: int = 60, user_id: int = None, device_id: int = None):
+    payload = {
         "contact_id": wid,
         "whatsapp_id": wid,
         "known_count": len(local_history),
         "oldest_id": local_history[0].get("id") if local_history else None,
         "mode": mode,
         "count": count,
-    })
+    }
+    if user_id:
+        payload["user_id"] = user_id
+    if device_id:
+        payload["device_id"] = device_id
+    await sio.emit('request_chat_history', payload)
 
 # ============================================================
 # AUTH ENDPOINTS
@@ -1020,15 +1204,24 @@ async def get_contacts(current_user: User = Depends(get_current_user)):
         contacts_mock_db[user_id] = [
             {"id": 1, "name": "Agrega tus contactos vinculando WhatsApp", "email": "", "status": "Info", "tag": "Sistema", "notes": "Escanea el QR en Dashboard para importar tus contactos reales."}
         ]
-    return contacts_mock_db[user_id]
+    
+    # FILTRO: Solo devolver contactos con JID válido de WhatsApp (contiene @)
+    filtered_contacts = [
+        c for c in contacts_mock_db[user_id]
+        if c.get("whatsapp_id") and '@' in str(c.get("whatsapp_id", ""))
+    ]
+    
+    total_original = len(contacts_mock_db[user_id])
+    print(f">>> [API/CONTACTS] Devolviendo {len(filtered_contacts)} contactos (de {total_original} total, filtrados por JID) para user_id={user_id}")
+    return filtered_contacts
 
 @app.put("/api/contacts/{contact_id}")
-async def update_contact(contact_id: int, data: dict):
-    for u_id in contacts_mock_db:
-        for contact in contacts_mock_db[u_id]:
-            if contact["id"] == contact_id:
-                contact.update(data)
-                return {"status": "success", "message": "Contacto actualizado"}
+async def update_contact(contact_id: int, data: dict, current_user: User = Depends(get_current_user)):
+    contact = find_user_contact(current_user.id, contact_id)
+    if contact:
+        contact.update(data)
+        db_upsert_contact(current_user.id, contact)
+        return {"status": "success", "message": "Contacto actualizado"}
     return {"status": "error", "message": "Contacto no encontrado"}
 
 # ============================================================
@@ -1048,30 +1241,30 @@ async def get_chats(current_user: User = Depends(get_current_user)):
     if not contacts:
         contacts = hydrate_user_contacts_from_db(user_id)
     
+    total_with_jid = 0
+    total_with_history = 0
+    
     chats = []
     for c in contacts:
         jid = c.get("whatsapp_id")
-        if not jid:
+        # FILTRO 1: Solo contactos con JID válido de WhatsApp (contiene @)
+        if not jid or '@' not in str(jid):
             continue
+        total_with_jid += 1
 
-        # Obtener preview y timestamp: priorizar historial real sobre metadata del contacto
-        last_message = c.get("last_message", "")
-        timestamp = c.get("timestamp", 0)
+        # Obtener historial COMPLETO para verificar si hay mensajes
+        history = get_chat_history_for_user(user_id, jid)
         
-        # Si no hay last_message en el contacto, buscar en el historial
-        if not last_message and jid in chat_histories and chat_histories[jid]:
-            history = chat_histories[jid]
-            last_msg = history[-1]
-            last_message = get_message_preview(last_msg)
-            timestamp = last_msg.get("timestamp", 0) or timestamp
-
-        # Si hay last_message pero es vacío, generar preview desde mediaType del contacto
-        if not last_message and c.get("mediaType"):
-            last_message = get_message_preview(c)
-
-        # Saltar contactos sin ninguna actividad
-        if not last_message and not timestamp:
+        # FILTRO 2: Solo incluir si hay historial REAL de mensajes
+        # Esto asegura que solo aparezcan contactos con los que has hablado
+        if not history or len(history) == 0:
             continue
+        total_with_history += 1
+        
+        # Tomar el último mensaje del historial real (más confiable)
+        last_msg = history[-1]
+        last_message = get_message_preview(last_msg)
+        timestamp = last_msg.get("timestamp", 0) or c.get("timestamp", 0)
 
         # Nombre con prioridad correcta
         name = resolve_contact_name(c, c.get("phone"))
@@ -1097,7 +1290,7 @@ async def get_chats(current_user: User = Depends(get_current_user)):
     # Ordenar por timestamp descendente (más reciente primero)
     chats.sort(key=lambda x: x.get("timestamp") or 0, reverse=True)
     
-    print(f">>> [API/CHATS] Devolviendo {len(chats)} chats para user_id={user_id}")
+    print(f">>> [API/CHATS] Con JID WhatsApp: {total_with_jid}, Con historial: {total_with_history}, Devueltos: {len(chats)}")
     return chats
 
 # ============================================================
@@ -1215,7 +1408,7 @@ async def get_devices(db: Session = Depends(get_db), current_user: User = Depend
 
 @app.post("/api/devices/start-qr")
 async def start_qr_session(data: dict, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    global active_qr_user_id
+    global active_qr_user_id, active_qr_device_id
     requested_device_id = data.get("device_id")
     active_qr_user_id = current_user.id
 
@@ -1230,11 +1423,17 @@ async def start_qr_session(data: dict, db: Session = Depends(get_db), current_us
         device = get_or_create_personal_device(db, current_user.id)
 
     qr_sessions[device.id] = current_user.id
+    active_qr_device_id = device.id
+    device.estado = "conectando"
+    db.commit()
+    start_bridge_for_device(current_user.id, device.id)
     
     print(f"[QR SESSION] Usuario {current_user.correo} (id={current_user.id}) inició sesión QR")
     
     print("--- [MAIN.PY] SOLICITANDO ESTADO ACTUAL AL PUENTE ---")
-    await sio.emit('request_whatsapp_status', {})
+    session_payload = {"user_id": current_user.id, "device_id": device.id}
+    await sio.emit('start_whatsapp_session', session_payload)
+    await sio.emit('request_whatsapp_status', session_payload)
     
     return {
         "status": "ok",
@@ -1285,8 +1484,8 @@ async def toggle_device(device_id: int, db: Session = Depends(get_db), current_u
 
 @app.post("/api/devices/logout")
 async def logout_device(current_user: User = Depends(get_current_user)):
+    global connected_whatsapp_user_id, active_qr_user_id, active_qr_device_id
     print(f"--- [MAIN.PY] USUARIO {current_user.id} SOLICITA LOGOUT DE WHATSAPP ---")
-    await sio.emit('whatsapp_logout', {})
 
     db = SessionLocal()
     try:
@@ -1295,11 +1494,23 @@ async def logout_device(current_user: User = Depends(get_current_user)):
             Device.nombre == "WhatsApp Personal"
         ).first()
         if device:
+            session_payload = {"user_id": current_user.id, "device_id": device.id}
+            await sio.emit('whatsapp_logout', session_payload)
+            stop_bridge_for_device(device.id)
+            connected_whatsapp_sessions.pop(device.id, None)
+            qr_sessions.pop(device.id, None)
             device.estado = "desconectado"
             db.commit()
             await sio.emit('device_status', {"device_id": device.id, "status": "desconectado"})
     finally:
         db.close()
+
+    if connected_whatsapp_user_id == current_user.id:
+        connected_whatsapp_user_id = None
+    if active_qr_user_id == current_user.id:
+        active_qr_user_id = None
+    if active_qr_device_id and active_qr_device_id not in qr_sessions:
+        active_qr_device_id = None
 
     return {"status": "success", "message": "Orden de logout enviada"}
 
@@ -1341,20 +1552,19 @@ async def get_chat_history(contact_id: str, current_user: User = Depends(get_cur
     if not contact_id or contact_id == "null" or contact_id == "undefined":
         return []
 
-    user_contacts = contacts_mock_db.get(current_user.id, [])
-    if not user_contacts:
-        user_contacts = hydrate_user_contacts_from_db(current_user.id)
+    contact = find_user_contact(current_user.id, contact_id)
+    wid = contact.get("whatsapp_id") if contact else None
 
-    contact = next((c for c in user_contacts if str(c.get("id")) == str(contact_id)), None)
-    wid = contact.get("whatsapp_id") if contact else (contact_id if "@" in contact_id else None)
-
-    if not wid:
-        print(f">>> [BACKEND] No se encontró JID para el ID: {contact_id}")
+    # FILTRO: Solo permitir historial para contactos con JID válido de WhatsApp
+    if not wid or '@' not in str(wid):
+        print(f">>> [BACKEND] Contacto sin JID WhatsApp válido (filtrado): {contact_id}, wid={wid}")
         return []
 
-    local_history = chat_histories.get(wid, [])
-    print(f">>> [BACKEND] PIDIENDO REFRESH DE HISTORIAL AL PUENTE PARA WID: {wid}")
-    await request_bridge_history_refresh(wid, local_history, mode="latest", count=60)
+    local_history = get_chat_history_for_user(current_user.id, wid)
+    target_device_id = contact.get("device_id") or get_active_device_id_for_user(current_user.id)
+    if connected_whatsapp_sessions.get(target_device_id) == current_user.id or active_qr_user_id == current_user.id:
+        print(f">>> [BACKEND] PIDIENDO REFRESH DE HISTORIAL AL PUENTE PARA WID: {wid}")
+        await request_bridge_history_refresh(wid, local_history, mode="latest", count=60, user_id=current_user.id, device_id=target_device_id)
     
     return local_history
 
@@ -1363,17 +1573,16 @@ async def load_more_chat_history(contact_id: str, count: int = 60, current_user:
     if not contact_id or contact_id in ("null", "undefined"):
         return {"status": "ignored", "reason": "contact_id invalido"}
 
-    user_contacts = contacts_mock_db.get(current_user.id, [])
-    if not user_contacts:
-        user_contacts = hydrate_user_contacts_from_db(current_user.id)
-
-    contact = next((c for c in user_contacts if str(c.get("id")) == str(contact_id)), None)
-    wid = contact.get("whatsapp_id") if contact else (contact_id if "@" in contact_id else None)
+    contact = find_user_contact(current_user.id, contact_id)
+    wid = contact.get("whatsapp_id") if contact else None
     if not wid:
         raise HTTPException(status_code=404, detail="Chat no encontrado")
 
-    local_history = chat_histories.get(wid, [])
-    await request_bridge_history_refresh(wid, local_history, mode="older", count=max(20, min(count, 120)))
+    local_history = get_chat_history_for_user(current_user.id, wid)
+    target_device_id = contact.get("device_id") or get_active_device_id_for_user(current_user.id)
+    if connected_whatsapp_sessions.get(target_device_id) != current_user.id and active_qr_user_id != current_user.id:
+        raise HTTPException(status_code=409, detail="No hay una sesion de WhatsApp activa para cargar mas historial")
+    await request_bridge_history_refresh(wid, local_history, mode="older", count=max(20, min(count, 120)), user_id=current_user.id, device_id=target_device_id)
     return {"status": "ok", "known_count": len(local_history)}
 
 # ============================================================
@@ -1384,11 +1593,12 @@ async def global_search(q: str, current_user: User = Depends(get_current_user)):
     results = []
     query = q.lower()
     
-    contacts_list = contacts_mock_db.get(current_user.id, [])
+    contacts_list = get_user_contacts_from_cache_or_db(current_user.id)
+    allowed_jids = {c.get("whatsapp_id") for c in contacts_list if c.get("whatsapp_id")}
     contact_names = {c.get("whatsapp_id"): resolve_contact_name(c) for c in contacts_list}
 
-    for jid, history in chat_histories.items():
-        for msg in history:
+    for jid in allowed_jids:
+        for msg in get_chat_history_for_user(current_user.id, jid):
             text = msg.get("text", "")
             if query in text.lower():
                 results.append({
@@ -1402,13 +1612,19 @@ async def global_search(q: str, current_user: User = Depends(get_current_user)):
 
 @app.post("/api/chat/read")
 async def mark_chat_as_read(whatsapp_id: str, message_id: str, current_user: User = Depends(get_current_user)):
-    if current_user.id in contacts_mock_db:
-        for contact in contacts_mock_db[current_user.id]:
-            if contact.get("whatsapp_id") == whatsapp_id:
-                contact["unread_count"] = 0
-                break
+    ensure_active_whatsapp_belongs_to_user(current_user.id)
+    contact = find_user_contact(current_user.id, whatsapp_id)
+    if not contact:
+        raise HTTPException(status_code=404, detail="Chat no encontrado")
+    contact["unread_count"] = 0
+    db_upsert_contact(current_user.id, contact)
     
-    await sio.emit('mark_as_read', {"whatsapp_id": whatsapp_id, "message_id": message_id})
+    await sio.emit('mark_as_read', {
+        "whatsapp_id": whatsapp_id,
+        "message_id": message_id,
+        "user_id": current_user.id,
+        "device_id": contact.get("device_id") or get_active_device_id_for_user(current_user.id)
+    })
     
     return {"status": "success"}
 
@@ -1417,19 +1633,22 @@ class NoteRequest(BaseModel):
 
 @app.post("/api/contacts/{contact_id}/notes")
 async def update_contact_notes(contact_id: int, request: NoteRequest, current_user: User = Depends(get_current_user)):
-    if current_user.id in contacts_mock_db:
-        for contact in contacts_mock_db[current_user.id]:
-            if contact.get("id") == contact_id:
-                contact["notes"] = request.notes
-                db_upsert_contact(current_user.id, contact)
-                return {"status": "success", "notes": request.notes}
+    contact = find_user_contact(current_user.id, contact_id)
+    if contact:
+        contact["notes"] = request.notes
+        db_upsert_contact(current_user.id, contact)
+        return {"status": "success", "notes": request.notes}
 
     raise HTTPException(status_code=404, detail="Contacto no encontrado")
 
 @app.post("/api/sync_contacts")
-async def sync_contacts():
+async def sync_contacts(current_user: User = Depends(get_current_user)):
+    ensure_active_whatsapp_belongs_to_user(current_user.id)
     print("--- [MAIN.PY] SOLICITANDO SINCRONIZACIÓN MANUAL AL PUENTE ---")
-    await sio.emit('request_contacts_sync', {})
+    await sio.emit('request_contacts_sync', {
+        "user_id": current_user.id,
+        "device_id": get_active_device_id_for_user(current_user.id)
+    })
     return {"status": "success", "message": "Petición de sincronización enviada"}
 
 @app.post("/api/chat/send-media")
@@ -1442,6 +1661,8 @@ async def send_media_file(
 ):
     """Recibe un archivo multimedia y lo envía por WhatsApp vía el bridge."""
     try:
+        ensure_active_whatsapp_belongs_to_user(current_user.id)
+        contact = require_user_contact(current_user.id, to)
         content = await file.read()
         b64_data = base64.b64encode(content).decode("utf-8")
 
@@ -1451,11 +1672,15 @@ async def send_media_file(
             "base64Data": b64_data,
             "fileName": file.filename,
             "mimeType": file.content_type,
-            "caption": caption
+            "caption": caption,
+            "user_id": current_user.id,
+            "device_id": contact.get("device_id") or get_active_device_id_for_user(current_user.id)
         })
 
         print(f">>> [API] MEDIA ENVIADA: {media_type} ({file.filename}) a {to}")
         return {"status": "success", "message": f"Archivo {media_type} enviado"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1841,8 +2066,11 @@ async def handle_whatsapp_qr_ready(sid, data):
 
 @sio.on('whatsapp_status')
 async def handle_whatsapp_status(sid, data):
+    global connected_whatsapp_user_id, active_qr_user_id, active_qr_device_id
     status_val = data.get("status")
     phone_val = data.get("phone")
+    event_user_id = safe_int(data.get("user_id"))
+    event_device_id = safe_int(data.get("device_id"))
     print(f">>> [BACKEND] RELAY: whatsapp_status -> {status_val} (Phone: {phone_val})")
     
     await sio.emit('whatsapp_status', data)
@@ -1850,23 +2078,27 @@ async def handle_whatsapp_status(sid, data):
     if status_val == "conectado":
         db = SessionLocal()
         try:
-            target_user_id = active_qr_user_id
+            target_user_id = event_user_id or active_qr_user_id or connected_whatsapp_user_id
             device = None
 
-            if phone_val:
+            if event_device_id:
+                device = db.query(Device).filter(Device.id == event_device_id).first()
+                if device:
+                    target_user_id = device.usuario_id
+
+            if phone_val and not device:
                 device = db.query(Device).filter(Device.numero_telefono == phone_val).first()
                 if device:
                     print(f">>> [BACKEND] REUTILIZANDO DISPOSITIVO EXISTENTE: {device.nombre} (ID: {device.id})")
-                    if target_user_id: device.usuario_id = target_user_id
+                    if target_user_id and device.usuario_id != target_user_id:
+                        print(f"[WARN] El telefono {phone_val} ya pertenece al usuario {device.usuario_id}; no se reasigna al usuario {target_user_id}.")
+                    target_user_id = device.usuario_id
 
             if not device and target_user_id:
                 device = db.query(Device).filter(
                     Device.usuario_id == target_user_id,
                     Device.nombre == "WhatsApp Personal"
                 ).first()
-
-            if not device:
-                device = db.query(Device).filter(Device.nombre == "WhatsApp Personal").first()
 
             if not device and target_user_id:
                 device = get_or_create_personal_device(db, target_user_id)
@@ -1877,15 +2109,31 @@ async def handle_whatsapp_status(sid, data):
                 if phone_val:
                     device.numero_telefono = phone_val
                 db.commit()
-                await sio.emit('device_status', {"device_id": device.id, "status": status_val})
+                connected_whatsapp_user_id = device.usuario_id
+                active_qr_user_id = device.usuario_id
+                active_qr_device_id = device.id
+                connected_whatsapp_sessions[device.id] = device.usuario_id
+                await sio.emit('device_status', {"device_id": device.id, "user_id": device.usuario_id, "status": status_val})
+            else:
+                print("[WARN] WhatsApp conectado, pero no hay usuario dueño del QR. No se asigna a ningun usuario.")
         finally:
             db.close()
+    elif status_val in ("session_expired", "desconectado", "logged_out", "error"):
+        if event_device_id:
+            connected_whatsapp_sessions.pop(event_device_id, None)
+            qr_sessions.pop(event_device_id, None)
+            if active_qr_device_id == event_device_id:
+                active_qr_device_id = None
+                active_qr_user_id = None
+        if not connected_whatsapp_sessions:
+            connected_whatsapp_user_id = None
 
 # *** FIX CRÍTICO: data=None para evitar TypeError cuando bridge emite sin payload ***
 @sio.on('whatsapp_ready_for_sync')
 async def handle_whatsapp_ready_for_sync(sid, data=None):
     print(">>> [BACKEND] RELAY: whatsapp_ready_for_sync")
     await sio.emit('whatsapp_ready_for_sync', data or {})
+    await sio.emit('request_contacts_sync', data or {})
 
 @sio.on('whatsapp_message')
 async def handle_whatsapp_message(sid, data):
@@ -1902,8 +2150,21 @@ async def handle_whatsapp_history(sid, data):
     contact_id = data.get("contact_id")
     history = data.get("history", [])
     print(f">>> [BACKEND] RECIBIDO HISTORIAL DE {len(history)} MENSAJES PARA {contact_id}")
-    chat_histories[contact_id] = history
-    await sio.emit('history_ready', {"contact_id": contact_id, "history": history})
+    target_user_ids = get_whatsapp_event_user_ids(data)
+    if not target_user_ids:
+        print("[WARN] Historial recibido sin usuario dueño de WhatsApp. Ignorando para evitar mezcla.")
+        return
+    owner_user_id = target_user_ids[0]
+    owner_device_id = get_whatsapp_event_device_id(data)
+    for msg in history:
+        msg["owner_user_id"] = owner_user_id
+        msg["device_id"] = owner_device_id
+    other_history = [
+        msg for msg in chat_histories.get(contact_id, [])
+        if msg.get("owner_user_id") not in (None, owner_user_id)
+    ]
+    chat_histories[contact_id] = other_history + history
+    await sio.emit('history_ready', {"contact_id": contact_id, "history": history, "user_id": owner_user_id, "device_id": owner_device_id})
 
 @sio.on('whatsapp_chat_history')
 async def handle_whatsapp_chat_history(sid, data):
@@ -1912,6 +2173,13 @@ async def handle_whatsapp_chat_history(sid, data):
     
     print(f">>> [BACKEND] RECIBIDO HISTORIAL BAILEYS PARA {jid}: {len(history)} MENSAJES")
     
+    target_user_ids = get_whatsapp_event_user_ids(data)
+    if not target_user_ids:
+        print("[WARN] Historial recibido sin usuario dueño de WhatsApp. Ignorando para evitar mezcla.")
+        return
+    owner_user_id = target_user_ids[0]
+    owner_device_id = get_whatsapp_event_device_id(data)
+
     normalized_history = []
     for h in history:
         normalized_history.append({
@@ -1924,10 +2192,20 @@ async def handle_whatsapp_chat_history(sid, data):
             "pushName": h.get("pushName"),
             "mediaType": h.get("mediaType"),
             "mediaPath": h.get("mediaPath"),
-            "fileName": h.get("fileName")
+            "fileName": h.get("fileName"),
+            "owner_user_id": owner_user_id,
+            "device_id": owner_device_id,
         })
 
     existing_history = chat_histories.get(jid, [])
+    other_history = [
+        item for item in existing_history
+        if item.get("owner_user_id") not in (None, owner_user_id)
+    ]
+    existing_history = [
+        item for item in existing_history
+        if item.get("owner_user_id") in (None, owner_user_id)
+    ]
     merged_history = {}
     for item in existing_history + normalized_history:
         item_id = item.get("id") or f"{item.get('timestamp', 0)}-{item.get('text', '')}"
@@ -1936,12 +2214,15 @@ async def handle_whatsapp_chat_history(sid, data):
         merged_history.values(),
         key=lambda item: normalize_timestamp(item.get("timestamp"))
     )
-    chat_histories[jid] = ordered_history
+    chat_histories[jid] = sorted(
+        other_history + ordered_history,
+        key=lambda item: normalize_timestamp(item.get("timestamp"))
+    )
     
     public_phone = normalize_phone_value(jid)
     db_contacts = []
-    for u_id in contacts_mock_db:
-        db_contacts.extend(contacts_mock_db[u_id])
+    for u_id in target_user_ids:
+        db_contacts.extend(contacts_mock_db.get(u_id, []))
     
     contact = next((c for c in db_contacts if contact_matches_identity(c, jid, public_phone)), None)
     c_id = contact.get("id") if contact else 1
@@ -1949,8 +2230,8 @@ async def handle_whatsapp_chat_history(sid, data):
     if ordered_history:
         last_msg = ordered_history[-1]
         preview = get_message_preview(last_msg)
-        for u_id in contacts_mock_db:
-            for c in contacts_mock_db[u_id]:
+        for u_id in target_user_ids:
+            for c in contacts_mock_db.get(u_id, []):
                 if not contact_matches_identity(c, jid, public_phone):
                     continue
                 if c.get("whatsapp_id") != jid:
@@ -1964,15 +2245,18 @@ async def handle_whatsapp_chat_history(sid, data):
                     c["pushName"] = last_msg.get("pushName")
                     if not c.get("name") or c.get("name") == c.get("phone"):
                         c["name"] = last_msg.get("pushName")
-                db_upsert_contact(u_id, c)
+                c["device_id"] = owner_device_id or c.get("device_id")
+                db_upsert_contact(u_id, c, owner_device_id)
                 for msg in normalized_history:
-                    db_save_message(jid, u_id, msg)
+                    db_save_message(jid, u_id, msg, owner_device_id)
     
     await sio.emit('history_ready', {
         "contact_id": jid,
         "contact_db_id": c_id,
         "whatsapp_id": jid,
         "history": ordered_history,
+        "user_id": owner_user_id,
+        "device_id": owner_device_id,
         "prepend": bool(data.get("prepend")),
         "hasMore": data.get("hasMore", False),
         "totalCount": data.get("totalCount", len(ordered_history))
@@ -1994,10 +2278,16 @@ async def process_whatsapp_message(data):
     preview = text or get_message_preview(data)
     
     print(f">>> [BACKEND] PROCESANDO MENSAJE DE {jid}: {str(preview)[:40]}...")
+    target_user_ids = get_whatsapp_event_user_ids(data)
+    if not target_user_ids:
+        print("[WARN] Mensaje recibido sin usuario dueño de WhatsApp. Ignorando para evitar mezcla.")
+        return
+    owner_user_id = target_user_ids[0]
+    owner_device_id = get_whatsapp_event_device_id(data)
     
     # Actualizar metadatos del contacto en contacts_mock_db
-    for u_id in contacts_mock_db:
-        for contact in contacts_mock_db[u_id]:
+    for u_id in target_user_ids:
+        for contact in contacts_mock_db.get(u_id, []):
             if contact_matches_identity(contact, jid, public_phone):
                 if contact.get("whatsapp_id") != jid:
                     merge_chat_history_keys(contact.get("whatsapp_id"), jid)
@@ -2037,9 +2327,14 @@ async def process_whatsapp_message(data):
         "fileName": data.get("fileName"),
         "status": data.get("status", 1),
         "participant": participant,
-        "pushName": push_name
+        "pushName": push_name,
+        "owner_user_id": owner_user_id,
+        "device_id": owner_device_id,
     }
-    existing_index = next((index for index, item in enumerate(chat_histories[jid]) if item.get("id") == message_id), None)
+    existing_index = next((
+        index for index, item in enumerate(chat_histories[jid])
+        if item.get("id") == message_id and item.get("owner_user_id") in (None, owner_user_id)
+    ), None)
     if existing_index is None:
         chat_histories[jid].append(new_msg)
     else:
@@ -2047,48 +2342,63 @@ async def process_whatsapp_message(data):
 
     # Persistir mensaje en SQLite
     target_uid_for_msg = None
-    for u_id in contacts_mock_db:
-        for c in contacts_mock_db[u_id]:
+    for u_id in target_user_ids:
+        for c in contacts_mock_db.get(u_id, []):
             if contact_matches_identity(c, jid, public_phone):
                 if c.get("whatsapp_id") != jid:
                     merge_chat_history_keys(c.get("whatsapp_id"), jid)
                     c["whatsapp_id"] = jid
                 target_uid_for_msg = u_id
                 # También persistir el contacto con el último mensaje actualizado
-                db_upsert_contact(u_id, c)
+                c["device_id"] = owner_device_id or c.get("device_id")
+                db_upsert_contact(u_id, c, owner_device_id)
                 break
         if target_uid_for_msg:
             break
-    db_save_message(jid, target_uid_for_msg or 0, new_msg)
+    db_save_message(jid, target_uid_for_msg or 0, new_msg, owner_device_id)
 
     # Notificar al frontend
     await sio.emit('new_whatsapp_message', {
         "contact_id": jid,
         "whatsapp_id": jid,
+        "user_id": owner_user_id,
+        "device_id": owner_device_id,
         "message": new_msg,
-        "unreadCount": next((c.get("unread_count", 0) for u in contacts_mock_db.values() for c in u if c.get("whatsapp_id") == jid), 0)
+        "unreadCount": next(
+            (
+                c.get("unread_count", 0)
+                for uid in target_user_ids
+                for c in contacts_mock_db.get(uid, [])
+                if c.get("whatsapp_id") == jid
+            ),
+            0
+        )
     })
 
 @sio.on('whatsapp_receipt')
 async def handle_whatsapp_receipt(sid, data):
-    print(f">>> [BACKEND] RECIBIDO RECIBO WHATSAPP: {len(data)} actualizaciones")
-    await sio.emit('message_status_update', data)
+    receipts = data.get("receipts", data) if isinstance(data, dict) else data
+    print(f">>> [BACKEND] RECIBIDO RECIBO WHATSAPP: {len(receipts)} actualizaciones")
+    await sio.emit('message_status_update', receipts)
+    target_user_ids = get_whatsapp_event_user_ids(data if isinstance(data, dict) else None)
     
-    for item in data:
+    for item in receipts:
         jid = item.get("key", {}).get("remoteJid")
         msg_id = item.get("key", {}).get("id")
         new_status = item.get("update", {}).get("status")
         
         if jid in chat_histories:
             for msg in chat_histories[jid]:
-                if msg.get("id") == msg_id:
+                if msg.get("id") == msg_id and msg.get("owner_user_id") in (None, *target_user_ids):
                     msg["status"] = new_status
                     break
 
 @sio.on('whatsapp_contacts')
 async def handle_whatsapp_contacts(sid, data):
     new_contacts = data.get("contacts", [])
-    target_user_id = active_qr_user_id
+    event_device_id = get_whatsapp_event_device_id(data)
+    event_user_ids = get_whatsapp_event_user_ids(data)
+    target_user_id = event_user_ids[0] if event_user_ids else (connected_whatsapp_user_id or active_qr_user_id)
     
     if target_user_id is None:
         db = SessionLocal()
@@ -2096,7 +2406,7 @@ async def handle_whatsapp_contacts(sid, data):
             device = db.query(Device).filter(
                 Device.nombre == "WhatsApp Personal",
                 Device.estado == "conectado"
-            ).first()
+            ).order_by(Device.conectado_en.desc()).first()
             if device:
                 target_user_id = device.usuario_id
                 print(f"--- [MAIN.PY] Fallback: Asignando contactos al dueño del dispositivo (user_id={target_user_id}) ---")
@@ -2104,6 +2414,10 @@ async def handle_whatsapp_contacts(sid, data):
             db.close()
 
     print(f"--- [MAIN.PY] RECIBIDOS {len(new_contacts)} CONTACTOS - asignando a user_id={target_user_id} ---")
+    
+    # Contador para filtrado
+    filtered_out = 0
+    processed = 0
     
     if target_user_id is None:
         print("[WARN] No hay usuario activo ni dispositivo conectado para asociar contactos. Ignorando.")
@@ -2130,6 +2444,21 @@ async def handle_whatsapp_contacts(sid, data):
         last_wc = wc
         w_id = wc.get("id")  # JID de Baileys
         num = wc.get("number")
+        is_group = wc.get("isGroup", False) or wc.get("is_group", False)
+        
+        # *** FILTRO CRÍTICO 1: Solo contactos con JID válido de WhatsApp ***
+        if not w_id or '@' not in str(w_id):
+            filtered_out += 1
+            continue
+        
+        # *** FILTRO CRÍTICO 2: Solo usuarios de WhatsApp o grupos ***
+        is_user = wc.get("isUser", True)
+        if not is_user and not is_group:
+            filtered_out += 1
+            continue
+        
+        wc["device_id"] = event_device_id
+        processed += 1
         
         # *** FIX: Resolver nombre con prioridad correcta desde Baileys ***
         name = resolve_contact_name({
@@ -2155,6 +2484,12 @@ async def handle_whatsapp_contacts(sid, data):
                 existing_contacts_map[w_id] = existing
 
         if existing:
+            # Solo actualizar si es usuario de WhatsApp o grupo
+            existing_is_user = existing.get("is_user", True)
+            if not is_user and not is_group and existing_is_user:
+                # El contacto existente era de WhatsApp, pero el nuevo no, no lo sobreescribimos
+                continue
+            
             # Solo actualizar nombre si el nuevo tiene más información
             if name and name != num:  # Si el nombre no es solo el número
                 existing["name"] = name
@@ -2169,12 +2504,19 @@ async def handle_whatsapp_contacts(sid, data):
             existing["participants"] = wc.get("participants", [])
             existing["photo_url"] = wc.get("photo_url") or existing.get("photo_url")
             existing["mediaType"] = wc.get("mediaType") or existing.get("mediaType")
+            existing["device_id"] = event_device_id or existing.get("device_id")
+            existing["is_user"] = is_user if is_user else existing.get("is_user", True)
             if num and not existing.get("is_group"):
                 existing_contacts_by_phone[normalize_phone_value(num)] = existing
             updated_count += 1
         else:
+            # Solo crear si es usuario de WhatsApp o grupo
+            if not is_user and not is_group:
+                continue
+                
             new_contact = {
                 "id": len(contacts_list) + 1,
+                "device_id": event_device_id,
                 "whatsapp_id": w_id,
                 "name": name,
                 "pushName": wc.get("pushName", ""),
@@ -2188,7 +2530,8 @@ async def handle_whatsapp_contacts(sid, data):
                 "last_message": last_msg_preview,
                 "timestamp": wc.get("timestamp", 0),
                 "unread_count": wc.get("unreadCount", 0),
-                "is_group": wc.get("isGroup", False),
+                "is_group": is_group,
+                "is_user": is_user,
                 "participants": wc.get("participants", []),
                 "photo_url": wc.get("photo_url"),
                 "mediaType": wc.get("mediaType"),
@@ -2198,17 +2541,17 @@ async def handle_whatsapp_contacts(sid, data):
                 existing_contacts_by_phone[normalize_phone_value(num)] = new_contact
             synced_count += 1
     
-    print(f">>> [BACKEND] PROCESADO: {synced_count} nuevos, {updated_count} actualizados.")
+    print(f">>> [BACKEND] CONTACTOS: {processed} procesados, {filtered_out} filtrados. {synced_count} nuevos, {updated_count} actualizados.")
 
     # Persistir contactos nuevos/actualizados en SQLite
     for c in contacts_mock_db.get(target_user_id, []):
-        db_upsert_contact(target_user_id, c)
+        db_upsert_contact(target_user_id, c, event_device_id or c.get("device_id"))
 
     # Solo emitir cuando termine el lote completo
     if last_wc:
         is_last_batch = last_wc.get("batch_index", 0) + 1 >= last_wc.get("total_chats", 1)
         if is_last_batch:
-            await sio.emit('contacts_updated', {"count": len(contacts_list), "user_id": target_user_id})
+            await sio.emit('contacts_updated', {"count": len(contacts_list), "user_id": target_user_id, "device_id": event_device_id})
 
 # ============================================================
 # SOCKET.IO — EVENTOS GENERALES
@@ -2232,17 +2575,26 @@ async def handle_contact_photo(sid, data):
     if not wid or not photo_url:
         return
 
-    for u_id in contacts_mock_db:
-        for contact in contacts_mock_db[u_id]:
+    target_user_ids = get_whatsapp_event_user_ids(data)
+    event_device_id = get_whatsapp_event_device_id(data)
+    if not target_user_ids:
+        print("[WARN] Foto de contacto recibida sin usuario dueño de WhatsApp. Ignorando para evitar mezcla.")
+        return
+
+    for u_id in target_user_ids:
+        for contact in contacts_mock_db.get(u_id, []):
             if contact_matches_identity(contact, wid, normalize_phone_value(wid)):
                 if contact.get("whatsapp_id") != wid:
                     merge_chat_history_keys(contact.get("whatsapp_id"), wid)
                     contact["whatsapp_id"] = wid
                 contact["photo_url"] = photo_url
-                db_upsert_contact(u_id, contact)
+                contact["device_id"] = event_device_id or contact.get("device_id")
+                db_upsert_contact(u_id, contact, event_device_id)
                 await sio.emit('contact_photo_updated', {
                     "whatsapp_id": wid,
-                    "photo_url": photo_url
+                    "photo_url": photo_url,
+                    "user_id": u_id,
+                    "device_id": event_device_id
                 })
                 return
 
@@ -2275,6 +2627,274 @@ async def message(sid, data):
 @sio.event
 async def disconnect(sid):
     print(f"Client disconnected: {sid}")
+
+# ============================================================
+# MENSAJES: EDITAR, ELIMINAR, REACCIONES
+# ============================================================
+
+class EditMessageRequest(BaseModel):
+    message_id: str
+    new_text: str
+
+@app.post("/api/chat/edit-message")
+async def edit_message(data: EditMessageRequest, current_user: User = Depends(get_current_user)):
+    """Edita un mensaje enviado."""
+    ensure_active_whatsapp_belongs_to_user(current_user.id)
+    await sio.emit('edit_message', {
+        "message_id": data.message_id,
+        "new_text": data.new_text,
+        "user_id": current_user.id,
+        "device_id": get_active_device_id_for_user(current_user.id)
+    })
+    return {"status": "success", "message_id": data.message_id}
+
+class DeleteMessageRequest(BaseModel):
+    message_id: str
+    jid: str
+    delete_for_everyone: bool = False
+
+@app.post("/api/chat/delete-message")
+async def delete_message(data: DeleteMessageRequest, current_user: User = Depends(get_current_user)):
+    """Elimina un mensaje."""
+    ensure_active_whatsapp_belongs_to_user(current_user.id)
+    contact = require_user_contact(current_user.id, data.jid)
+    await sio.emit('delete_message', {
+        "message_id": data.message_id,
+        "jid": data.jid,
+        "delete_for_everyone": data.delete_for_everyone,
+        "user_id": current_user.id,
+        "device_id": contact.get("device_id") or get_active_device_id_for_user(current_user.id)
+    })
+    return {"status": "success", "message_id": data.message_id}
+
+class ReactionRequest(BaseModel):
+    message_id: str
+    jid: str
+    reaction: str
+
+@app.post("/api/chat/react")
+async def send_reaction(data: ReactionRequest, current_user: User = Depends(get_current_user)):
+    """Envía una reacción a un mensaje."""
+    ensure_active_whatsapp_belongs_to_user(current_user.id)
+    contact = require_user_contact(current_user.id, data.jid)
+    valid_reactions = ["❤️", "😂", "😮", "😢", "😡", "😍", "👍", "👎"]
+    if data.reaction not in valid_reactions:
+        raise HTTPException(status_code=400, detail="Reacción no válida")
+    
+    await sio.emit('send_reaction', {
+        "message_id": data.message_id,
+        "jid": data.jid,
+        "reaction": data.reaction,
+        "user_id": current_user.id,
+        "device_id": contact.get("device_id") or get_active_device_id_for_user(current_user.id)
+    })
+    return {"status": "success"}
+
+# ============================================================
+# GRUPOS: CREAR, GESTIONAR
+# ============================================================
+
+class CreateGroupRequest(BaseModel):
+    subject: str
+    participants: List[str]
+
+@app.post("/api/groups/create")
+async def create_group(data: CreateGroupRequest, current_user: User = Depends(get_current_user)):
+    """Crea un nuevo grupo de WhatsApp."""
+    ensure_active_whatsapp_belongs_to_user(current_user.id)
+    await sio.emit('create_group', {
+        "subject": data.subject,
+        "participants": data.participants,
+        "user_id": current_user.id,
+        "device_id": get_active_device_id_for_user(current_user.id)
+    })
+    return {"status": "success"}
+
+class GroupActionRequest(BaseModel):
+    jid: str
+    participants: List[str]
+
+@app.post("/api/groups/add-participants")
+async def add_group_participants(data: GroupActionRequest, current_user: User = Depends(get_current_user)):
+    """Agrega participantes a un grupo."""
+    ensure_active_whatsapp_belongs_to_user(current_user.id)
+    contact = require_user_contact(current_user.id, data.jid, group_only=True)
+    await sio.emit('add_group_participants', {
+        "jid": data.jid,
+        "participants": data.participants,
+        "user_id": current_user.id,
+        "device_id": contact.get("device_id") or get_active_device_id_for_user(current_user.id)
+    })
+    return {"status": "success"}
+
+@app.post("/api/groups/remove-participants")
+async def remove_group_participants(data: GroupActionRequest, current_user: User = Depends(get_current_user)):
+    """Remueve participantes de un grupo."""
+    ensure_active_whatsapp_belongs_to_user(current_user.id)
+    contact = require_user_contact(current_user.id, data.jid, group_only=True)
+    await sio.emit('remove_group_participants', {
+        "jid": data.jid,
+        "participants": data.participants,
+        "user_id": current_user.id,
+        "device_id": contact.get("device_id") or get_active_device_id_for_user(current_user.id)
+    })
+    return {"status": "success"}
+
+class SetAdminRequest(BaseModel):
+    jid: str
+    participant: str
+    action: str  # "promote" or "demote"
+
+@app.post("/api/groups/set-admin")
+async def set_group_admin(data: SetAdminRequest, current_user: User = Depends(get_current_user)):
+    """Promueve o degrada a un admin."""
+    ensure_active_whatsapp_belongs_to_user(current_user.id)
+    contact = require_user_contact(current_user.id, data.jid, group_only=True)
+    if data.action not in ("promote", "demote"):
+        raise HTTPException(status_code=400, detail="Acción no válida")
+    
+    await sio.emit('set_group_admin', {
+        "jid": data.jid,
+        "participant": data.participant,
+        "action": data.action,
+        "user_id": current_user.id,
+        "device_id": contact.get("device_id") or get_active_device_id_for_user(current_user.id)
+    })
+    return {"status": "success"}
+
+@app.post("/api/groups/leave")
+async def leave_group(jid: str, current_user: User = Depends(get_current_user)):
+    """Sale de un grupo."""
+    ensure_active_whatsapp_belongs_to_user(current_user.id)
+    contact = require_user_contact(current_user.id, jid, group_only=True)
+    await sio.emit('leave_group', {
+        "jid": jid,
+        "user_id": current_user.id,
+        "device_id": contact.get("device_id") or get_active_device_id_for_user(current_user.id)
+    })
+    return {"status": "success"}
+
+# ============================================================
+# ESTADOS (STORIES)
+# ============================================================
+
+@app.get("/api/status")
+async def get_status_list(current_user: User = Depends(get_current_user)):
+    """Obtiene la lista de estados (stories)."""
+    ensure_active_whatsapp_belongs_to_user(current_user.id)
+    await sio.emit('request_status_list', {
+        "user_id": current_user.id,
+        "device_id": get_active_device_id_for_user(current_user.id)
+    })
+    return {"status": "success"}
+
+class PostStatusRequest(BaseModel):
+    media_type: Optional[str] = None
+    media_base64: Optional[str] = None
+    caption: Optional[str] = ""
+    background_color: Optional[str] = None
+
+@app.post("/api/status/post")
+async def post_status(data: PostStatusRequest, current_user: User = Depends(get_current_user)):
+    """Publica un estado (story)."""
+    ensure_active_whatsapp_belongs_to_user(current_user.id)
+    await sio.emit('post_status', {
+        "mediaType": data.media_type,
+        "mediaBase64": data.media_base64,
+        "caption": data.caption,
+        "backgroundColor": data.background_color,
+        "user_id": current_user.id,
+        "device_id": get_active_device_id_for_user(current_user.id)
+    })
+    return {"status": "success"}
+
+# ============================================================
+# CONTACTOS: INFO Y BÚSQUEDA AVANZADA
+# ============================================================
+
+@app.get("/api/contacts/{jid}/info")
+async def get_contact_info(jid: str, current_user: User = Depends(get_current_user)):
+    """Obtiene información de un contacto."""
+    ensure_active_whatsapp_belongs_to_user(current_user.id)
+    contact = require_user_contact(current_user.id, jid)
+    await sio.emit('get_contact_info', {
+        "jid": jid,
+        "user_id": current_user.id,
+        "device_id": contact.get("device_id") or get_active_device_id_for_user(current_user.id)
+    })
+    return {"status": "success"}
+
+# ============================================================
+# ADJUNTAR MÚLTIPLES ARCHIVOS
+# ============================================================
+
+@app.post("/api/chat/send-media-multiple")
+async def send_multiple_media(
+    files: List[UploadFile] = File(...),
+    to: str = Form(...),
+    caption: str = Form(""),
+    current_user: User = Depends(get_current_user)
+):
+    """Envía múltiples archivos a la vez."""
+    ensure_active_whatsapp_belongs_to_user(current_user.id)
+    contact = require_user_contact(current_user.id, to)
+    target_device_id = contact.get("device_id") or get_active_device_id_for_user(current_user.id)
+    results = []
+    
+    for file in files:
+        try:
+            content = await file.read()
+            b64_data = base64.b64encode(content).decode("utf-8")
+            
+            media_type = "document"
+            if file.content_type.startswith("image/"):
+                media_type = "image"
+            elif file.content_type.startswith("video/"):
+                media_type = "video"
+            elif file.content_type.startswith("audio/"):
+                media_type = "audio"
+            
+            await sio.emit("send_whatsapp_media", {
+                "to": to,
+                "mediaType": media_type,
+                "base64Data": b64_data,
+                "fileName": file.filename,
+                "mimeType": file.content_type,
+                "caption": caption if files.index(file) == 0 else "",
+                "user_id": current_user.id,
+                "device_id": target_device_id
+            })
+            
+            results.append({"file": file.filename, "status": "sent"})
+        except Exception as e:
+            results.append({"file": file.filename, "status": "error", "error": str(e)})
+    
+    return {"status": "success", "results": results}
+
+# ============================================================
+# SINCRONIZACIÓN COMPLETA
+# ============================================================
+
+@app.post("/api/sync/full")
+async def full_sync(current_user: User = Depends(get_current_user)):
+    """Fuerza una sincronización completa desde WhatsApp."""
+    ensure_active_whatsapp_belongs_to_user(current_user.id)
+    await sio.emit('request_contacts_sync', {
+        "user_id": current_user.id,
+        "device_id": get_active_device_id_for_user(current_user.id)
+    })
+    return {"status": "success", "message": "Sincronización completa iniciada"}
+
+@app.get("/api/sync/status")
+async def get_sync_status(current_user: User = Depends(get_current_user)):
+    """Obtiene el estado actual de la sincronización."""
+    contacts = get_user_contacts_from_cache_or_db(current_user.id)
+    user_jids = {c.get("whatsapp_id") for c in contacts if c.get("whatsapp_id")}
+    return {
+        "is_syncing": bool(contacts),
+        "contacts_count": len(contacts),
+        "chats_count": len([jid for jid in user_jids if get_chat_history_for_user(current_user.id, jid)])
+    }
 
 if __name__ == "__main__":
     import uvicorn

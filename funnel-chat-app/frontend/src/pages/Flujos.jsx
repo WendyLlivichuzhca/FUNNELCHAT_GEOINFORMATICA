@@ -11,7 +11,7 @@ import {
     Position
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Plus, Save, Play, MessageSquare, Split, Send, X } from 'lucide-react';
+import { Plus, Save, Play, MessageSquare, Split, Send, X, CheckCircle, ChevronDown } from 'lucide-react';
 
 // --- Componentes de Nodos Personalizados ---
 
@@ -127,7 +127,10 @@ const Flujos = () => {
     const [testInput, setTestInput] = useState('');
     const [currentTestNode, setCurrentTestNode] = useState(null);
     const [saveToast, setSaveToast] = useState(null);
-    const [automatizaciones, setAutomatizaciones] = useState([]);
+    const [automatizaciones, setAutomatizaciones] = useState(() => {
+    const saved = localStorage.getItem('flujos_automatizaciones');
+    return saved ? JSON.parse(saved) : [];
+});
     const [currentFlowId, setCurrentFlowId] = useState(null);
     const [currentFlowName, setCurrentFlowName] = useState('Flujo Principal');
     const [showFlowSelector, setShowFlowSelector] = useState(false);
@@ -235,21 +238,31 @@ const Flujos = () => {
             const response = await fetch('http://localhost:8000/api/flows', {
                 method: 'POST',
                 headers: authHeaders,
-                body: JSON.stringify({ nombre: newFlowName, tipo_disparador: 'palabra_clave', nodos: initialNodes, conexiones: initialEdges }),
+                body: JSON.stringify({ 
+                    nombre: newFlowName, 
+                    tipo_disparador: 'palabra_clave', 
+                    nodos: nodes, 
+                    conexiones: edges 
+                }),
             });
-            const data = await res.json();
+            const data = await response.json();
             if (data.status === 'success' && data.id) {
-                const newAuto = { id: data.id, nombre: newFlowName, nodos: initialNodes, conexiones: initialEdges };
+                const newAuto = { 
+                    id: data.id, 
+                    nombre: newFlowName, 
+                    nodos: nodes, 
+                    conexiones: edges 
+                };
                 setAutomatizaciones(prev => [...prev, newAuto]);
+                localStorage.setItem('flujos_automatizaciones', JSON.stringify([...automatizaciones, newAuto]));
                 setCurrentFlowId(data.id);
                 setCurrentFlowName(newFlowName);
-                setNodes(initialNodes);
-                setEdges(initialEdges);
                 setNewFlowName('');
                 setShowNewFlowModal(false);
                 showSaveToast(`Flujo "${newFlowName}" creado`);
             }
-        } catch {
+        } catch (e) {
+            console.error('Error creando flujo:', e);
             showSaveToast('Error al crear flujo', 'error');
         }
     };
@@ -511,7 +524,7 @@ const Flujos = () => {
                             type="text"
                             value={newFlowName}
                             onChange={e => setNewFlowName(e.target.value)}
-                            onKeyPress={e => e.key === 'Enter' && handleCreateNewFlow()}
+                            onKeyPress={e => e.key === 'Enter' && saveFlow()}
                             className="input-styled"
                             style={{ width: '100%', fontSize: '14px', marginBottom: '24px' }}
                             placeholder="Ej: Flujo de Bienvenida"

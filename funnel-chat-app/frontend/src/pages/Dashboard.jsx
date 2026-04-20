@@ -770,15 +770,14 @@ const Dashboard = ({ onAuthError }) => {
         }
     };
 
-    useEffect(() => {
+    const loadDashboardData = async () => {
         const token = localStorage.getItem('token');
         const headers = {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
         };
 
-        // Fetch stats
-        fetch('http://127.0.0.1:8000/api/stats', { headers })
+        await fetch('http://127.0.0.1:8000/api/stats', { headers })
             .then(res => res.json())
             .then(data => {
                 setStats({
@@ -790,27 +789,32 @@ const Dashboard = ({ onAuthError }) => {
             })
             .catch(err => console.error("Error fetching stats:", err));
 
-            try {
-                const devicesData = await fetchJson('http://127.0.0.1:8000/api/devices', { headers });
-                setDevices(Array.isArray(devicesData) ? devicesData : []);
-            } catch (err) {
+        await fetch('http://127.0.0.1:8000/api/devices', { headers })
+            .then(res => res.json())
+            .then(data => {
+                setDevices(Array.isArray(data) ? data : []);
+            })
+            .catch(err => {
                 console.error("Error fetching devices:", err);
                 setDevices([]);
-            }
+            });
 
-            try {
-                const contactsData = await fetchJson('http://127.0.0.1:8000/api/contacts', { headers });
-                const sorted = Array.isArray(contactsData) ? [...contactsData].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) : [];
+        await fetch('http://127.0.0.1:8000/api/chats', { headers })
+            .then(res => res.json())
+            .then(data => {
+                const sorted = Array.isArray(data) ? [...data].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) : [];
                 setRecentChats(sorted.slice(0, 5));
-            } catch (err) {
+            })
+            .catch(err => {
                 console.error("Error fetching recent chats:", err);
                 setRecentChats([]);
-            }
-        };
+            });
+    };
 
+    useEffect(() => {
         loadDashboardData();
-
-        // Socket.io for Real-time Device Status
+    
+    // Socket.io for Real-time Device Status
         socket.on('device_status', (data) => {
             console.log("Device status update received:", data);
             setDevices(prev => {
@@ -830,9 +834,13 @@ const Dashboard = ({ onAuthError }) => {
 
         socket.on('contacts_updated', (data) => {
             console.log("Contactos sincronizados correctamente:", data);
-            fetchJson('http://127.0.0.1:8000/api/contacts', { headers })
-                .then(data => {
-                    const sorted = Array.isArray(data) ? [...data].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) : [];
+            const token = localStorage.getItem('token');
+            fetch('http://127.0.0.1:8000/api/chats', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            })
+                .then(res => res.json())
+                .then(d => {
+                    const sorted = Array.isArray(d) ? [...d].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) : [];
                     setRecentChats(sorted.slice(0, 5));
                 })
                 .catch(err => console.error("Error refreshing contacts:", err));
@@ -856,7 +864,11 @@ const Dashboard = ({ onAuthError }) => {
                     updatedChats.splice(existingIdx, 1);
                     return [updatedContact, ...updatedChats].slice(0, 5);
                 } else {
-                    fetchJson('http://127.0.0.1:8000/api/contacts', { headers })
+                    const token = localStorage.getItem('token');
+                    fetch('http://127.0.0.1:8000/api/chats', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    })
+                        .then(res => res.json())
                         .then(d => {
                             const sorted = Array.isArray(d) ? [...d].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) : [];
                             setRecentChats(sorted.slice(0, 5));
